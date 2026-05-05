@@ -1,0 +1,13 @@
+# ซ่อนไฟล์ตั้งค่าและความลับต่างๆ เช่น Supabase API Keys
+.env
+.env.*
+!.env.example
+
+# ซ่อนโฟลเดอร์แพ็กเกจของ Node.js (ไฟล์หนักมาก ให้เพื่อนไป npm install เอาเอง)
+node_modules/
+
+# ซ่อนโฟลเดอร์ Build ของ React / Nuxt.js
+dist/
+build/
+.nuxt/
+.output/
