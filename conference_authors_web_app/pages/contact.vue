@@ -7,11 +7,35 @@ const name = ref('');
 const email = ref('');
 const message = ref('');
 const sent = ref(false);
+const isSending = ref(false);
 
-const handleSend = () => {
+const handleSend = async () => {
   if (!name.value || !email.value || !message.value) return;
-  sent.value = true;
-  setTimeout(() => { sent.value = false; name.value = ''; email.value = ''; message.value = ''; }, 4000);
+  isSending.value = true;
+  
+  try {
+    await $fetch('/api/contact', {
+      method: 'POST',
+      body: {
+        name: name.value,
+        email: email.value,
+        message: message.value
+      }
+    });
+
+    sent.value = true;
+    setTimeout(() => { 
+      sent.value = false; 
+      name.value = ''; 
+      email.value = ''; 
+      message.value = ''; 
+    }, 4000);
+  } catch (error) {
+    console.error('Email error:', error);
+    alert('เกิดข้อผิดพลาดในการส่งข้อความ โปรดลองใหม่อีกครั้ง');
+  } finally {
+    isSending.value = false;
+  }
 };
 
 const contacts = [
@@ -121,10 +145,15 @@ const colorMap = {
             </div>
             <button
               type="submit"
-              class="w-full h-12 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black text-[14px] hover:shadow-[0_8px_30px_rgba(147,51,234,0.3)] hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2"
+              :disabled="isSending"
+              class="w-full h-12 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black text-[14px] hover:shadow-[0_8px_30px_rgba(147,51,234,0.3)] hover:-translate-y-0.5 transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
             >
-              <Send class="w-4 h-4" />
-              ส่งข้อความ
+              <Send v-if="!isSending" class="w-4 h-4" />
+              <svg v-else class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {{ isSending ? 'กำลังส่ง...' : 'ส่งข้อความ' }}
             </button>
           </form>
         </div>

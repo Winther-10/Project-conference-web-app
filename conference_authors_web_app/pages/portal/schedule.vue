@@ -35,11 +35,23 @@ const query = ref('');
 const expandedSessions = ref(new Set());
 const myPlan = ref(new Set());
 const onlyMyPapers = ref(false);
+const filterYear = ref('all');
+const activeAcademicYear = ref(null);
 
 onMounted(async () => {
+  await fetchSettings();
   await fetchSchedule();
   await fetchMyPapers();
 });
+
+const fetchSettings = async () => {
+  const { data } = await supabase.from('system_settings').select('config_json').single();
+  if (data?.config_json?.conference) {
+    const conf = data.config_json.conference;
+    activeAcademicYear.value = conf.academicYear || conf.year || new Date().getFullYear();
+    if (filterYear.value === 'all') filterYear.value = String(activeAcademicYear.value);
+  }
+};
 
 const fetchSchedule = async () => {
   isLoading.value = true;
@@ -105,7 +117,8 @@ const fetchSchedule = async () => {
           code: row.papers?.paper_code || row.paper_id?.slice(0, 8),
           title: row.papers?.title_th || row.papers?.title_en || 'Untitled',
           presenter: pAuthors.length > 0 ? pAuthors.join(', ') : 'Presenter',
-          time: startStr
+          time: startStr,
+          abstract: row.papers?.abstract_th || row.papers?.abstract_en
         });
       });
       
@@ -122,10 +135,8 @@ const fetchSchedule = async () => {
       const allTracks = new Set();
       schedule.value.forEach(s => {
         allTracks.add(s.track);
-        s.papers.forEach(p => {
-           // Also add paper tracks if needed, but session track is main
-        });
       });
+      
       if (allTracks.size > 0) {
         tracks.value = Array.from(allTracks);
       }
@@ -138,6 +149,23 @@ const fetchSchedule = async () => {
     isLoading.value = false;
   }
 };
+
+const yearOptions = computed(() => {
+  const years = new Set();
+  if (activeAcademicYear.value) years.add(String(activeAcademicYear.value));
+  
+  // Also add years from paper codes in the schedule
+  schedule.value.forEach(s => {
+    s.papers.forEach(p => {
+      if (p.code) {
+        const match = p.code.match(/-(\d{2})/);
+        if (match) years.add('20' + match[1]);
+      }
+    });
+  });
+
+  return Array.from(years).sort((a, b) => Number(b) - Number(a));
+});
 
 const fetchMyPapers = async () => {
   if (!userProfile.value) return;
@@ -193,6 +221,11 @@ const filteredSessions = computed(() => {
   const rq = roomQuery.value.trim().toLowerCase();
 
   return schedule.value
+    .filter((s) => {
+      if (filterYear.value === 'all') return true;
+      const yy = filterYear.value.slice(-2);
+      return (s.papers || []).some(p => p.code && p.code.includes(`-${yy}`));
+    })
     .filter((s) => s.dayId === activeDay.value)
     .filter((s) => {
       if (selectedTracks.value.size === 0) return true;
@@ -286,6 +319,7 @@ const getTrackBadgeClass = (track) => {
 
 <template>
   <div class="flex-1 flex flex-col h-full bg-[#F1F5F9] animate-in slide-in-from-right duration-300 font-['Sarabun'] overflow-hidden">
+    <ClientOnly>
     <div class="flex-1 overflow-y-auto custom-scrollbar">
       <div class="p-4 max-w-7xl mx-auto w-full">
         <div class="flex flex-col gap-4">
@@ -294,14 +328,21 @@ const getTrackBadgeClass = (track) => {
             <div class="mt-1 text-sm font-semibold text-slate-500 truncate">วางแผนการนำเสนอและการเข้าร่วมฟังบรรยายของคุณ</div>
           </div>
 
-          <div class="w-full">
-            <div class="relative">
+          <div class="w-full flex gap-3">
+            <div class="relative flex-1">
               <Search :size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 v-model="query"
                 class="w-full h-9 pl-9 pr-3 rounded-lg bg-white border border-slate-200 text-sm focus:outline-none focus:border-purple-300 focus:ring-2 focus:ring-purple-100 transition-shadow"
                 placeholder="ค้นหาหัวข้อ, รหัส, ผู้นำเสนอ..."
               />
+            </div>
+            <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 h-9 shrink-0">
+              <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Year:</span>
+              <select v-model="filterYear" class="text-xs font-black text-slate-800 bg-transparent focus:outline-none border-none">
+                <option value="all">All Years</option>
+                <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+              </select>
             </div>
           </div>
         </div>
@@ -335,21 +376,21 @@ const getTrackBadgeClass = (track) => {
               </div>
             </div>
 
-            <div class="p-4">
-              <div class="flex items-center gap-2 text-xs font-extrabold text-slate-900 mb-3">
-                <Filter :size="14" class="text-slate-500" /> ตัวกรอง (Filters)
+            <div class="p-5">
+              <div class="flex items-center gap-2 text-[14px] font-extrabold text-slate-900 mb-4">
+                <Filter :size="16" class="text-slate-500" /> ตัวกรอง (Filters)
               </div>
 
-              <div class="flex flex-col gap-3">
+              <div class="flex flex-col gap-4">
                 <div>
-                  <div class="text-xs font-extrabold text-slate-700 mb-2">สาขา (Tracks)</div>
-                  <div class="flex flex-wrap gap-1.5">
+                  <div class="text-[13px] font-extrabold text-slate-700 mb-3">สาขา (Tracks)</div>
+                  <div class="flex flex-wrap gap-2">
                     <button
                       v-for="t in tracks"
                       :key="t"
                       @click="toggleTrack(t)"
                       :class="[
-                        'h-8 px-3 rounded-lg border text-xs font-extrabold transition-colors',
+                        'h-9 px-4 rounded-xl border text-[13px] font-extrabold transition-colors shadow-sm',
                         selectedTracks.has(t) ? 'bg-purple-600 border-purple-600 text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                       ]"
                     >
@@ -360,29 +401,29 @@ const getTrackBadgeClass = (track) => {
 
 
 
-                <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <div class="flex gap-2">
-                    <button @click="selectAllTracks" class="h-8 px-3 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors text-xs font-extrabold">
+                    <button @click="selectAllTracks" class="h-9 px-4 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors text-[13px] font-extrabold shadow-sm">
                       เลือกทั้งหมด
                     </button>
-                    <button @click="clearTracks" class="h-8 px-3 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 hover:bg-white transition-colors text-xs font-extrabold">
+                    <button @click="clearTracks" class="h-9 px-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-700 hover:bg-white transition-colors text-[13px] font-extrabold shadow-sm">
                       ล้าง
                     </button>
                   </div>
                   <button @click="onlyMyPapers = !onlyMyPapers" :class="[
-                    'h-8 px-3 rounded-lg border text-xs font-extrabold transition-colors flex items-center gap-1.5',
+                    'h-9 px-4 rounded-xl border text-[13px] font-extrabold transition-colors flex items-center gap-2 shadow-sm',
                     onlyMyPapers ? 'bg-yellow-50 border-yellow-300 text-yellow-800' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                   ]">
-                    <Star class="w-3.5 h-3.5" :class="onlyMyPapers ? 'fill-yellow-500 text-yellow-500' : ''" />
+                    <Star class="w-4 h-4" :class="onlyMyPapers ? 'fill-yellow-500 text-yellow-500' : ''" />
                     เฉพาะบทความของฉัน
                   </button>
                 </div>
               </div>
 
-              <div class="mt-4 bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-                <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                  <div class="text-sm font-extrabold text-slate-900 inline-flex items-center gap-2">
-                    <Calendar :size="14" class="text-slate-500" />
+              <div class="mt-6 bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                  <div class="text-[14px] font-extrabold text-slate-900 inline-flex items-center gap-2">
+                    <Calendar :size="16" class="text-slate-500" />
                     ตารางของฉัน (My Plan)
                   </div>
                 </div>
@@ -425,18 +466,18 @@ const getTrackBadgeClass = (track) => {
               <div class="p-4 border-b border-slate-100 bg-slate-50/40">
                 <div class="flex flex-col gap-2">
                   <div class="flex flex-wrap items-center gap-1.5">
-                    <span class="inline-flex items-center gap-1 rounded-full bg-white border border-slate-200 px-2 py-1 text-[10px] font-extrabold text-slate-700">
-                      <Clock :size="12" class="text-slate-500" /> {{ formatRange(s.start, s.end) }}
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-200 px-3 py-1.5 text-[12px] font-extrabold text-slate-700">
+                      <Clock :size="14" class="text-slate-500" /> {{ formatRange(s.start, s.end) }}
                     </span>
-                    <span class="inline-flex items-center gap-1 rounded-full bg-white border border-slate-200 px-2 py-1 text-[10px] font-extrabold text-slate-700">
-                      <MapPin :size="12" class="text-slate-500" /> {{ s.room }}
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-200 px-3 py-1.5 text-[12px] font-extrabold text-slate-700">
+                      <MapPin :size="14" class="text-slate-500" /> {{ s.room }}
                     </span>
-                    <span :class="['inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-extrabold border', getFormatBadgeConfig(s.format).class]">
+                    <span :class="['inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-extrabold border', getFormatBadgeConfig(s.format).class]">
                       {{ getFormatBadgeConfig(s.format).icon }} {{ s.format }}
                     </span>
-                    <span :class="['inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border', getTrackBadgeClass(s.track)]">{{ s.track }}</span>
-                    <span v-if="s.papers.some(p => myPaperIds.has(p.id))" class="inline-flex items-center gap-1 rounded-full bg-yellow-50 border border-yellow-200 px-2 py-1 text-[10px] font-extrabold text-yellow-800">
-                      <Star :size="12" /> บทความของคุณ
+                    <span :class="['inline-flex items-center rounded-full px-3 py-1.5 text-[12px] font-extrabold border', getTrackBadgeClass(s.track)]">{{ s.track }}</span>
+                    <span v-if="s.papers.some(p => myPaperIds.has(p.id))" class="inline-flex items-center gap-1.5 rounded-full bg-yellow-50 border border-yellow-200 px-3 py-1.5 text-[12px] font-extrabold text-yellow-800">
+                      <Star :size="14" /> บทความของคุณ
                     </span>
                   </div>
                 </div>
@@ -450,20 +491,26 @@ const getTrackBadgeClass = (track) => {
 
               <div class="p-4" v-if="s.papers && s.papers.length > 0">
                 <div class="space-y-2">
-                  <div v-for="p in (expandedSessions.has(s.id) ? s.papers : s.papers.slice(0, 2))" :key="p.id" :class="['rounded-lg border p-3 flex items-start justify-between gap-2', myPaperIds.has(p.id) ? 'bg-yellow-50/40 border-yellow-200' : 'bg-white border-slate-200']">
+                  <div v-for="p in (expandedSessions.has(s.id) ? s.papers : s.papers.slice(0, 2))" :key="p.id" :class="['rounded-2xl border p-5 flex items-start justify-between gap-4', myPaperIds.has(p.id) ? 'bg-yellow-50/40 border-yellow-200' : 'bg-white border-slate-200']">
                     <div class="min-w-0 flex-1">
-                      <div class="flex items-baseline gap-2">
-                        <div class="text-[10px] font-black text-slate-500 font-['Sarabun']">{{ p.time }}</div>
-                        <div class="text-xs font-extrabold text-slate-900 line-clamp-2">
-                          {{ p.code }}: {{ p.title }} <span v-if="myPaperIds.has(p.id)" class="text-yellow-700">(คุณ)</span>
+                      <div class="flex items-center gap-3 mb-2">
+                        <div class="text-[13px] font-black text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md">{{ p.time }}</div>
+                        <div class="text-[15px] font-black text-slate-900 line-clamp-2 leading-snug">
+                          {{ p.code }}: {{ p.title }} <span v-if="myPaperIds.has(p.id)" class="text-yellow-700 bg-yellow-100 px-2 py-0.5 rounded-md text-xs ml-1">(บทความของคุณ)</span>
                         </div>
                       </div>
-                      <div class="mt-1 text-[10px] font-semibold text-slate-500">ผู้นำเสนอ: {{ p.presenter }}</div>
-                      <div v-if="p.abstract" class="mt-1 text-[10px] font-medium text-slate-600 line-clamp-2">{{ p.abstract }}</div>
+                      <div class="flex items-center gap-2 text-[13px] font-bold text-slate-600 mt-3">
+                        <Users :size="14" class="text-slate-400" />
+                        <span>ผู้นำเสนอ: {{ p.presenter }}</span>
+                      </div>
+                      <div v-if="p.abstract" class="mt-3 text-[13px] font-medium text-slate-500 line-clamp-3 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-100">
+                        <span class="font-bold text-slate-700 mr-1">บทคัดย่อ:</span>{{ p.abstract }}
+                      </div>
                     </div>
-                    <button @click="toggleSave(s.id, p.id)" :class="['h-7 w-7 rounded-lg border text-xs font-extrabold transition-colors inline-flex items-center justify-center flex-shrink-0', isSaved(s.id, p.id) ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50']">
-                      <Check v-if="isSaved(s.id, p.id)" :size="12" />
-                      <Bookmark v-else :size="12" />
+                    <button @click="toggleSave(s.id, p.id)" :class="['h-10 px-4 rounded-xl border text-[13px] font-black transition-colors inline-flex items-center justify-center gap-2 flex-shrink-0 shadow-sm hover:-translate-y-0.5', isSaved(s.id, p.id) ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50']">
+                      <Check v-if="isSaved(s.id, p.id)" :size="16" />
+                      <Bookmark v-else :size="16" />
+                      <span class="hidden sm:inline">{{ isSaved(s.id, p.id) ? 'บันทึกแล้ว' : 'บันทึก' }}</span>
                     </button>
                   </div>
                 </div>
@@ -479,5 +526,6 @@ const getTrackBadgeClass = (track) => {
         </div>
       </div>
     </div>
+    </ClientOnly>
   </div>
 </template>

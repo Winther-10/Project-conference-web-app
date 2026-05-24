@@ -1,8 +1,8 @@
 <script setup>
 definePageMeta({ layout: 'portal' });
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { Search, Plus, Edit, Eye, Download, CreditCard, Trash2, Clock, CheckCircle, AlertCircle, XCircle, ChevronDown, Calendar, FileText, UploadCloud, X, ArrowLeft, User } from 'lucide-vue-next';
+import { Search, Plus, Edit, Eye, Download, CreditCard, Trash2, Clock, CheckCircle, AlertCircle, XCircle, ChevronDown, Calendar, FileText, UploadCloud, X, ArrowLeft, User, FileUp, FileImage } from 'lucide-vue-next';
 import { useAuth } from '~/composables/useAuth';
 import { useSupabase } from '~/composables/useSupabase';
 
@@ -21,8 +21,10 @@ const toast = ref(null);
 const selectedArticle = ref(null);
 const uploadModalOpen = ref(false);
 const uploadArticle = ref(null);
-const uploadFile = ref(null);
-const uploadError = ref('');
+const revFullPaperFiles = ref([]);
+const revSuppFiles = ref([]);
+const revFullPaperError = ref('');
+const revSuppError = ref('');
 const isUploading = ref(false);
 
 const detailMode = ref(null); // 'accepted', 'pending', 'revision', 'rejected'
@@ -48,12 +50,12 @@ const isPastRevisionDeadline = computed(() => {
   return new Date() > new Date(revisionDeadlineDate.value);
 });
 
-const fetchArticles = async () => {
+const fetchArticles = async (showLoader = true) => {
   if (!userProfile.value) {
     isLoading.value = false;
     return;
   }
-  isLoading.value = true;
+  if (showLoader) isLoading.value = true;
   try {
     const [papersRes, settingsRes] = await Promise.all([
       supabase.from('papers').select('*').eq('author_id', userProfile.value.user_id).order('created_at', { ascending: false }),
@@ -70,37 +72,100 @@ const fetchArticles = async () => {
     }
   } catch (error) {
     console.error('Fetch Error:', error);
-    showToast('Failed to fetch articles: ' + (error.message || ''), 'err');
+    if (showLoader) showToast('Failed to fetch articles: ' + (error.message || ''), 'err');
   } finally {
-    isLoading.value = false;
+    if (showLoader) isLoading.value = false;
   }
 };
+
+let realtimeChannel = null;
+
+const setupRealtime = () => {
+  if (!userProfile.value) return;
+  
+  if (realtimeChannel) {
+    supabase.removeChannel(realtimeChannel);
+  }
+  
+  realtimeChannel = supabase
+    .channel('public:papers')
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // Listen to INSERT, UPDATE, DELETE
+        schema: 'public',
+        table: 'papers',
+        filter: `author_id=eq.${userProfile.value.user_id}`
+      },
+      (payload) => {
+        console.log('Realtime papers change received:', payload);
+        // Refresh the articles list in the background without loading spinner
+        fetchArticles(false); 
+      }
+    )
+    .subscribe();
+};
+
+// --- Tab Resume: refetch when Chrome tab becomes visible again ---
+useTabResume(() => {
+  if (userProfile.value) {
+    console.log('[articles] Tab resumed — refetching articles');
+    fetchArticles(false);
+    setupRealtime(); // Re-establish realtime (Chrome kills WebSockets)
+  }
+});
 
 onMounted(async () => {
   if (userProfile.value) {
     await fetchArticles();
+    setupRealtime();
+    
+    // Default to latest year
+    if (yearOptions.value.length > 1 && yearFilter.value === 'all') {
+      const latest = yearOptions.value[1].value;
+      yearFilter.value = latest;
+    }
   }
 });
 
-watch(userProfile, async (newProfile) => {
+onUnmounted(() => {
+  if (realtimeChannel) {
+    supabase.removeChannel(realtimeChannel);
+  }
+});
+
+// Watch for userProfile changes (e.g. after tab-resume session refresh in useAuth)
+watch(userProfile, async (newProfile, oldProfile) => {
   if (newProfile) {
     await fetchArticles();
+    setupRealtime();
+  } else if (!newProfile && oldProfile) {
+    articles.value = [];
+    if (realtimeChannel) {
+      supabase.removeChannel(realtimeChannel);
+      realtimeChannel = null;
+    }
   }
-}, { immediate: true });
+});
 
 const yearOptions = computed(() => {
   const years = new Set();
-  const currentYear = new Date().getFullYear();
-  years.add(currentYear);
   
   articles.value.forEach(article => {
-    if (article.created_at) {
-      const y = new Date(article.created_at).getFullYear();
-      if (y) years.add(y);
+    // Try to get year from paper_code first (Academic Year)
+    if (article.paper_code) {
+      const match = article.paper_code.match(/-(\d{2})/);
+      if (match) {
+        years.add('20' + match[1]); // Convert 27 -> 2027
+      } else if (article.created_at) {
+        years.add(String(new Date(article.created_at).getFullYear()));
+      }
+    } else if (article.created_at) {
+      years.add(String(new Date(article.created_at).getFullYear()));
     }
   });
 
-  const sortedYears = Array.from(years).sort((a, b) => b - a);
+  const sortedYears = Array.from(years).sort((a, b) => Number(b) - Number(a));
   return [
     { value: 'all', label: 'ทุกปี' },
     ...sortedYears.map(y => ({ value: String(y), label: String(y) }))
@@ -114,9 +179,13 @@ const normalizeYearToAD = (year) => {
   return n > 2400 ? String(n - 543) : String(n);
 };
 
-const extractYearFromDate = (dateStr) => {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
+const extractYearFromPaper = (article) => {
+  if (article.paper_code) {
+    const match = article.paper_code.match(/-(\d{2})/);
+    if (match) return '20' + match[1];
+  }
+  if (!article.created_at) return '';
+  const d = new Date(article.created_at);
   if (isNaN(d.getTime())) return '';
   return String(d.getFullYear());
 };
@@ -137,12 +206,18 @@ const filteredArticles = computed(() => {
     const matchesSearch = pid.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
                          title.toLowerCase().includes(searchQuery.value.toLowerCase());
     
-    const matchesStatus = statusFilter.value === 'all' || article.status === statusFilter.value;
+    const matchesStatus = (() => {
+      if (statusFilter.value === 'all') return true;
+      if (statusFilter.value === 'pending') {
+        return article.status === 'pending' || article.status === 'pending_review';
+      }
+      return article.status === statusFilter.value;
+    })();
     
     const matchesYear = (() => {
       if (yearFilter.value === 'all') return true;
       const adYearFilter = normalizeYearToAD(yearFilter.value);
-      const articleYear = extractYearFromDate(article.created_at);
+      const articleYear = extractYearFromPaper(article);
       return articleYear === adYearFilter;
     })();
     
@@ -166,11 +241,16 @@ const closeDetail = () => {
   detailArticle.value = null;
 };
 
-const getStatusConfig = (status) => {
+const getStatusConfig = (article) => {
+  if (!article) return { icon: Clock, color: 'bg-slate-50 text-slate-700 border-slate-200', label: 'ไม่ทราบ' };
+  const status = article.status || 'pending';
+  const isRevision = article.file_url && article.file_url.includes('|||');
+  
   const config = {
     draft: { icon: Edit, color: 'bg-slate-100 text-slate-700 border-slate-200', label: 'ร่าง' },
-    pending: { icon: Clock, color: 'bg-yellow-50 text-yellow-700 border-yellow-200', label: 'รอตรวจ' },
-    revision: { icon: AlertCircle, color: 'bg-orange-50 text-orange-700 border-orange-200', label: 'แก้ไข' },
+    pending: { icon: Clock, color: 'bg-yellow-50 text-yellow-700 border-yellow-200', label: isRevision ? 'รอตรวจแก้ไข' : 'รอตรวจ' },
+    pending_review: { icon: Clock, color: 'bg-yellow-50 text-yellow-700 border-yellow-200', label: isRevision ? 'รอตรวจแก้ไข' : 'รอตรวจ' },
+    revision_required: { icon: AlertCircle, color: 'bg-purple-50 text-purple-700 border-purple-200', label: 'รอผู้แต่งแก้ไข' },
     accepted: { icon: CheckCircle, color: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: 'ผ่าน' },
     published: { icon: CheckCircle, color: 'bg-blue-50 text-blue-700 border-blue-200', label: 'ตีพิมพ์' },
     rejected: { icon: XCircle, color: 'bg-rose-50 text-rose-700 border-rose-200', label: 'ไม่ผ่าน' }
@@ -216,65 +296,119 @@ const executeWithdraw = async () => {
 const closeUploadModal = () => {
   uploadModalOpen.value = false;
   uploadArticle.value = null;
-  uploadFile.value = null;
-  uploadError.value = '';
+  revFullPaperFiles.value = [];
+  revSuppFiles.value = [];
+  revFullPaperError.value = '';
+  revSuppError.value = '';
   isUploading.value = false;
 };
 
-const validateUploadFile = (file) => {
-  if (!file) return '';
-  const maxBytes = 20 * 1024 * 1024;
-  const ext = String(file.name || '').split('.').pop()?.toLowerCase();
+const handlePickRevFullPaper = (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  const maxBytes = 10 * 1024 * 1024;
   const allowed = new Set(['pdf', 'doc', 'docx']);
-
-  if (!allowed.has(ext)) return 'รองรับเฉพาะไฟล์ .pdf, .doc, .docx';
-  if (file.size > maxBytes) return 'ขนาดไฟล์ต้องไม่เกิน 20MB';
-  return '';
+  let currentSize = revFullPaperFiles.value.reduce((acc, f) => acc + f.size, 0);
+  for (const file of files) {
+    const ext = String(file.name || '').split('.').pop()?.toLowerCase();
+    if (!allowed.has(ext)) { revFullPaperError.value = 'รองรับเฉพาะไฟล์ .pdf, .doc, .docx เท่านั้น'; return; }
+    if (revFullPaperFiles.value.length >= 2) { revFullPaperError.value = 'อัปโหลดได้สูงสุด 2 ไฟล์เท่านั้น'; return; }
+    if (currentSize + file.size > maxBytes) { revFullPaperError.value = 'ขนาดไฟล์รวมต้องไม่เกิน 10MB'; return; }
+    currentSize += file.size;
+    revFullPaperFiles.value.push(file);
+  }
+  revFullPaperError.value = '';
+  e.target.value = '';
 };
 
-const handlePickUploadFile = (e) => {
-  const file = e.target.files?.[0];
-  const err = validateUploadFile(file);
-  uploadError.value = err;
-  uploadFile.value = err ? null : file;
+const removeRevFullPaper = (idx) => {
+  revFullPaperFiles.value.splice(idx, 1);
+  revFullPaperError.value = '';
+};
+
+const handlePickRevSupp = (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  const maxBytes = 10 * 1024 * 1024;
+  const allowed = new Set(['png', 'jpg', 'jpeg', 'zip']);
+  let currentSize = revSuppFiles.value.reduce((acc, f) => acc + f.size, 0);
+  for (const file of files) {
+    const ext = String(file.name || '').split('.').pop()?.toLowerCase();
+    if (!allowed.has(ext)) { revSuppError.value = 'รองรับเฉพาะไฟล์รูปภาพ หรือ .zip เท่านั้น'; return; }
+    if (currentSize + file.size > maxBytes) { revSuppError.value = 'ขนาดไฟล์รวมต้องไม่เกิน 10MB'; return; }
+    currentSize += file.size;
+    revSuppFiles.value.push(file);
+  }
+  revSuppError.value = '';
+  e.target.value = '';
+};
+
+const removeRevSupp = (idx) => {
+  revSuppFiles.value.splice(idx, 1);
+  revSuppError.value = '';
 };
 
 const openUploadModalForArticle = (article) => {
   uploadArticle.value = article;
   uploadModalOpen.value = true;
-  uploadFile.value = null;
-  uploadError.value = '';
+  revFullPaperFiles.value = [];
+  revSuppFiles.value = [];
+  revFullPaperError.value = '';
+  revSuppError.value = '';
   isUploading.value = false;
 };
 
 const confirmUpload = async () => {
   if (!uploadArticle.value) return;
-  const err = validateUploadFile(uploadFile.value);
-  if (err) {
-    uploadError.value = err;
+  if (revFullPaperFiles.value.length === 0) {
+    revFullPaperError.value = 'กรุณาอัปโหลดไฟล์บทความอย่างน้อย 1 ไฟล์';
     return;
   }
 
   isUploading.value = true;
-  uploadError.value = '';
+  revFullPaperError.value = '';
+  revSuppError.value = '';
   
   try {
-    const fileExt = uploadFile.value.name.split('.').pop();
-    const fileName = `${uploadArticle.value.paper_code || uploadArticle.value.paper_id}_revision_${Math.random()}.${fileExt}`;
-    const filePath = `revisions/${fileName}`;
+    const uploadedUrls = [];
+    const allFiles = [...revFullPaperFiles.value, ...revSuppFiles.value];
     
-    const { error: uploadErr } = await supabase.storage
-      .from('papers')
-      .upload(filePath, uploadFile.value);
+    for (const file of allFiles) {
+      // Sanitize the paper code to avoid any special character issues
+      const safePrefix = (uploadArticle.value.paper_code || uploadArticle.value.paper_id).replace(/[^a-zA-Z0-9-]/g, '_');
+      const cleanName = file.name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_');
+      const fileName = `${safePrefix}_revision_${Date.now()}_${cleanName}`;
+      // Use submissions folder to match submit.vue and avoid RLS path restrictions
+      const filePath = `submissions/${userProfile.value.user_id}/${fileName}`;
       
-    if (uploadErr) throw uploadErr;
+      const { error: uploadErr } = await supabase.storage
+        .from('papers')
+        .upload(filePath, file);
+        
+      if (uploadErr) throw uploadErr;
+      
+      const { data: { publicUrl } } = supabase.storage.from('papers').getPublicUrl(filePath);
+      uploadedUrls.push(publicUrl);
+    }
     
-    const { data: { publicUrl } } = supabase.storage.from('papers').getPublicUrl(filePath);
+    const newFileUrlStr = uploadedUrls.join(',');
+    
+    // Fetch the latest paper from Supabase to prevent stale state from overwriting the original file_url
+    const { data: latestPaper, error: fetchErr } = await supabase
+      .from('papers')
+      .select('file_url')
+      .eq('paper_id', uploadArticle.value.paper_id)
+      .maybeSingle();
+      
+    if (fetchErr) throw fetchErr;
+    
+    const existingFileUrl = latestPaper?.file_url || '';
+    const updatedFileUrl = existingFileUrl ? `${existingFileUrl}|||${newFileUrlStr}` : newFileUrlStr;
     
     const { error: updateErr } = await supabase
       .from('papers')
-      .update({ file_url: publicUrl, status: 'pending' })
-      .eq('id', uploadArticle.value.id);
+      .update({ file_url: updatedFileUrl, status: 'pending_review' })
+      .eq('paper_id', uploadArticle.value.paper_id);
       
     if (updateErr) throw updateErr;
 
@@ -282,7 +416,8 @@ const confirmUpload = async () => {
     await fetchArticles();
     closeUploadModal();
   } catch (e) {
-    uploadError.value = 'อัปโหลดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+    console.error('Upload error details:', e);
+    revFullPaperError.value = `อัปโหลดไม่สำเร็จ: ${e.message || 'กรุณาลองใหม่อีกครั้ง'}`;
   } finally {
     isUploading.value = false;
   }
@@ -290,7 +425,7 @@ const confirmUpload = async () => {
 
 const getPrimaryAction = (article) => {
   switch (article.status) {
-    case 'revision':
+    case 'revision_required':
       return { label: 'อัปโหลดไฟล์แก้ไข', icon: UploadCloud, onClick: () => openUploadModalForArticle(article), variant: 'orange' };
     case 'accepted':
       return { label: 'ดาวน์โหลดบทความ', icon: Download, onClick: () => handleAction('download', article), variant: 'slate' };
@@ -305,8 +440,8 @@ const getPrimaryAction = (article) => {
 
 const getSecondaryAction = (article) => {
   switch (article.status) {
-    case 'revision':
-      return { label: 'ดูรายละเอียด', icon: Eye, onClick: () => openDetail('revision', article) };
+    case 'revision_required':
+      return { label: 'ดูรายละเอียด', icon: Eye, onClick: () => openDetail('revision_required', article) };
     case 'accepted':
       return { label: 'ดูรายละเอียด', icon: Eye, onClick: () => openDetail('accepted', article) };
     case 'pending':
@@ -321,6 +456,18 @@ const getAuthorName = (article) => {
     return [userProfile.value.first_name_th, userProfile.value.last_name_th].filter(Boolean).join(' ') || userProfile.value.email;
   }
   return 'ผู้ส่งบทความ';
+};
+
+const downloadFile = (url) => {
+  if (url) {
+    window.open(url, '_blank');
+  }
+};
+
+const getDisplayFileName = (url) => {
+  if (!url) return 'Unknown File';
+  const name = decodeURIComponent(url.split('/').pop() || '');
+  return name.replace(/_\d{10,13}_/, '_');
 };
 </script>
 
@@ -362,7 +509,7 @@ const getAuthorName = (article) => {
           <div class="lg:col-span-5">
             <div class="w-full bg-slate-50/50 rounded-[20px] p-1.5 flex items-center gap-1 overflow-x-auto no-scrollbar border border-slate-200">
               <button
-                v-for="t in [{ value: 'all', label: 'ทั้งหมด' }, { value: 'revision', label: 'รอแก้ไข' }, { value: 'accepted', label: 'ผ่าน' }, { value: 'pending', label: 'รอพิจารณา' }, { value: 'rejected', label: 'ปฏิเสธ' }]"
+                v-for="t in [{ value: 'all', label: 'ทั้งหมด' }, { value: 'revision_required', label: 'รอแก้ไข' }, { value: 'accepted', label: 'ผ่าน' }, { value: 'pending', label: 'รอพิจารณา' }, { value: 'rejected', label: 'ปฏิเสธ' }]"
                 :key="t.value"
                 @click="statusFilter = t.value"
                 :class="[
@@ -409,7 +556,7 @@ const getAuthorName = (article) => {
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div
               v-for="article in currentArticles"
-              :key="article.id"
+              :key="article.paper_id"
               class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm hover:shadow-xl hover:border-purple-200 hover:-translate-y-1 transition-all duration-300 group"
             >
               <div class="flex items-start justify-between gap-4">
@@ -424,9 +571,9 @@ const getAuthorName = (article) => {
                   </div>
                 </div>
                 <div class="flex-shrink-0">
-                  <span :class="['inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black border uppercase tracking-wider', getStatusConfig(article.status).color]">
-                    <component :is="getStatusConfig(article.status).icon" :size="12" />
-                    {{ getStatusConfig(article.status).label }}
+                  <span :class="['inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-black border uppercase tracking-wider', getStatusConfig(article).color]">
+                    <component :is="getStatusConfig(article).icon" :size="12" />
+                    {{ getStatusConfig(article).label }}
                   </span>
                 </div>
               </div>
@@ -496,8 +643,8 @@ const getAuthorName = (article) => {
     <!-- Upload Modal -->
     <div v-if="uploadModalOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button @click="closeUploadModal" class="absolute inset-0 bg-black/50 backdrop-blur-[2px]" />
-      <div class="relative w-full max-w-lg rounded-[28px] bg-white shadow-2xl">
-        <div class="flex items-center justify-between px-7 pt-6">
+      <div class="relative w-full max-w-xl rounded-[28px] bg-white shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div class="flex items-center justify-between px-7 pt-6 sticky top-0 bg-white/90 backdrop-blur z-10">
           <div>
             <div class="text-lg font-extrabold text-slate-900">อัปโหลดไฟล์แก้ไข</div>
             <div v-if="uploadArticle" class="mt-1 text-xs font-semibold text-slate-500">#{{ uploadArticle.paper_code || uploadArticle.paper_id?.slice(0, 8) }}</div>
@@ -507,40 +654,74 @@ const getAuthorName = (article) => {
           </button>
         </div>
 
-        <div class="px-7 pb-7 pt-5">
-          <label class="block rounded-[22px] border border-slate-200 bg-slate-50/50 p-5 cursor-pointer hover:bg-white transition-colors">
-            <input type="file" class="hidden" accept=".pdf,.doc,.docx" @change="handlePickUploadFile" />
-            <div class="flex flex-col items-center text-center">
-              <div class="w-20 h-20 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center">
-                <UploadCloud :size="28" class="text-orange-500" />
-              </div>
-              <div class="mt-4 text-sm font-extrabold text-slate-900">ลากไฟล์มาวาง หรือคลิกเพื่อเลือกไฟล์</div>
-              <div class="mt-1 text-xs font-semibold text-slate-500">รองรับเฉพาะไฟล์ .pdf และ .docx (ไม่เกิน 20MB)</div>
-
-              <div class="mt-4 w-full">
-                <div v-if="uploadFile" class="w-full rounded-2xl bg-white border border-slate-200 px-4 py-3 flex items-center justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="text-xs font-extrabold text-slate-800 truncate">{{ uploadFile.name }}</div>
-                    <div class="text-[11px] font-semibold text-slate-500">{{ (uploadFile.size / (1024 * 1024)).toFixed(2) }} MB</div>
+        <div class="px-7 pb-7 pt-5 space-y-6">
+          <!-- 1. Full Paper -->
+          <div>
+            <label class="text-sm font-bold text-slate-700 mb-2 flex items-center justify-between">
+              <span>1. ไฟล์บทความฉบับเต็ม (Full Paper) *</span>
+              <span class="text-xs font-normal text-slate-400">สูงสุด 2 ไฟล์</span>
+            </label>
+            <div v-if="revFullPaperFiles.length > 0" class="mb-3 space-y-2">
+              <div v-for="(f, idx) in revFullPaperFiles" :key="idx" class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div class="flex items-center gap-3 overflow-hidden">
+                  <FileUp :size="20" class="text-purple-500 shrink-0" />
+                  <div class="truncate">
+                    <p class="text-xs font-bold text-slate-700 truncate">{{ f.name }}</p>
+                    <p class="text-[10px] text-slate-400">{{ (f.size / (1024 * 1024)).toFixed(2) }} MB</p>
                   </div>
-                  <button @click.prevent="uploadFile = null; uploadError = '';" class="w-9 h-9 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center hover:bg-white">
-                    <Trash2 :size="16" class="text-slate-600" />
-                  </button>
                 </div>
+                <button @click="removeRevFullPaper(idx)" class="text-red-400 hover:text-red-600 p-1 shrink-0"><Trash2 :size="14" /></button>
               </div>
             </div>
-          </label>
+            <label v-if="revFullPaperFiles.length < 2" class="border-2 border-dashed border-slate-300 rounded-2xl p-6 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-purple-400 transition-all cursor-pointer group bg-slate-50/50">
+              <input type="file" class="hidden" accept=".pdf,.doc,.docx" multiple @change="handlePickRevFullPaper" />
+              <div class="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                <Plus :size="20" class="text-purple-500" />
+              </div>
+              <p class="text-sm font-bold text-slate-600">คลิกเพื่อเลือกไฟล์บทความ</p>
+              <p class="text-xs text-slate-400 mt-1">(.pdf, .doc, .docx รวมไม่เกิน 10MB)</p>
+            </label>
+            <p v-if="revFullPaperError" class="text-xs font-bold text-red-500 mt-2">{{ revFullPaperError }}</p>
+          </div>
 
-          <div v-if="uploadError" class="mt-3 text-xs font-bold text-rose-600">{{ uploadError }}</div>
-          <div v-if="isPastRevisionDeadline" class="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-100 flex items-center gap-2">
+          <!-- 2. Supplementary -->
+          <div>
+            <label class="text-sm font-bold text-slate-700 mb-2 flex items-center justify-between">
+              <span>2. ไฟล์เพิ่มเติม (Supplementary Files)</span>
+              <span class="text-xs font-normal text-slate-400">เลือกได้หลายไฟล์</span>
+            </label>
+            <div v-if="revSuppFiles.length > 0" class="mb-3 space-y-2">
+              <div v-for="(f, idx) in revSuppFiles" :key="idx" class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                <div class="flex items-center gap-3 overflow-hidden">
+                  <FileImage :size="20" class="text-blue-500 shrink-0" />
+                  <div class="truncate">
+                    <p class="text-xs font-bold text-slate-700 truncate">{{ f.name }}</p>
+                    <p class="text-[10px] text-slate-400">{{ (f.size / (1024 * 1024)).toFixed(2) }} MB</p>
+                  </div>
+                </div>
+                <button @click="removeRevSupp(idx)" class="text-red-400 hover:text-red-600 p-1 shrink-0"><Trash2 :size="14" /></button>
+              </div>
+            </div>
+            <label class="border-2 border-dashed border-slate-300 rounded-2xl p-6 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-blue-400 transition-all cursor-pointer group bg-slate-50/50">
+              <input type="file" class="hidden" accept=".png,.jpg,.jpeg,.zip" multiple @change="handlePickRevSupp" />
+              <div class="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                <Plus :size="20" class="text-blue-500" />
+              </div>
+              <p class="text-sm font-bold text-slate-600">คลิกเพื่อเลือกไฟล์รูปภาพ หรือไฟล์ zip</p>
+              <p class="text-xs text-slate-400 mt-1">(.png, .jpg, .zip รวมไม่เกิน 10MB)</p>
+            </label>
+            <p v-if="revSuppError" class="text-xs font-bold text-red-500 mt-2">{{ revSuppError }}</p>
+          </div>
+
+          <div v-if="isPastRevisionDeadline" class="p-3 rounded-xl bg-amber-50 border border-amber-100 flex items-center gap-2">
             <AlertCircle :size="14" class="text-amber-600" />
             <span class="text-[11px] font-bold text-amber-700">ส่งผลงานแก้ไขหลังกำหนด ({{ formatDate(revisionDeadlineDate) }})</span>
           </div>
 
           <button
             @click="confirmUpload"
-            :disabled="!uploadFile || Boolean(uploadError) || isUploading"
-            class="mt-6 w-full h-12 rounded-2xl bg-slate-900 text-white font-extrabold text-sm shadow-xl shadow-slate-300/60 hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="revFullPaperFiles.length === 0 || isUploading"
+            class="w-full h-12 rounded-2xl bg-slate-900 text-white font-extrabold text-sm shadow-xl shadow-slate-300/60 hover:bg-slate-800 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {{ isUploading ? 'กำลังอัปโหลด...' : 'ยืนยันการส่งไฟล์' }}
           </button>
@@ -574,9 +755,9 @@ const getAuthorName = (article) => {
                 </span>
               </div>
               <div class="flex-shrink-0">
-                <span :class="['inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border', getStatusConfig(detailArticle.status).color]">
-                  <component :is="getStatusConfig(detailArticle.status).icon" :size="12" />
-                  {{ getStatusConfig(detailArticle.status).label }}
+                <span :class="['inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border', getStatusConfig(detailArticle).color]">
+                  <component :is="getStatusConfig(detailArticle).icon" :size="12" />
+                  {{ getStatusConfig(detailArticle).label }}
                 </span>
               </div>
             </div>
@@ -586,7 +767,7 @@ const getAuthorName = (article) => {
             </h2>
 
             <!-- Revision specific banner -->
-            <div v-if="detailMode === 'revision'" class="mt-4 flex items-center gap-2 flex-wrap">
+            <div v-if="detailMode === 'revision_required'" class="mt-4 flex items-center gap-2 flex-wrap">
               <span class="inline-flex items-center gap-2 rounded-2xl bg-orange-50 text-orange-700 border border-orange-200 px-3 py-1.5 text-xs font-extrabold">
                 <AlertCircle :size="14" /> กรุณาแก้ไขและอัปโหลดใหม่
               </span>
@@ -634,22 +815,32 @@ const getAuthorName = (article) => {
                   {{ detailArticle.abstract_th || detailArticle.abstract_en || '—' }}
                 </p>
 
-                <div v-if="detailArticle.file_url" class="mt-5 rounded-[20px] bg-slate-900 text-white px-4 py-4 flex items-center justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="text-xs font-extrabold truncate">ไฟล์บทความ</div>
+                <!-- Split files into original and revision for Author -->
+                <div v-if="detailArticle.file_url" class="mt-5 space-y-4">
+                  <div v-for="(roundUrls, roundIdx) in detailArticle.file_url.split('|||')" :key="roundIdx" class="space-y-2">
+                    <div class="text-[11px] font-black text-slate-400 uppercase tracking-wider">
+                      {{ roundIdx === 0 ? 'ไฟล์ส่งครั้งแรก (Original Files)' : 'ไฟล์แก้ไข (Revised Files)' }}
+                    </div>
+                    <div v-for="(url, fileIdx) in roundUrls.split(',')" :key="fileIdx" class="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+                      <div class="flex items-center gap-3 min-w-0">
+                        <div class="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-500 shrink-0">
+                          <FileText :size="18" />
+                        </div>
+                        <div class="text-[13px] font-bold text-slate-800 truncate" :title="getDisplayFileName(url)">
+                          {{ getDisplayFileName(url) }}
+                        </div>
+                      </div>
+                      <button @click="downloadFile(url)" class="h-9 px-4 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-[11px] font-black flex items-center gap-2 shrink-0 transition-colors">
+                        <Download :size="14" /> โหลด
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    @click="handleAction('download', detailArticle)"
-                    class="w-11 h-11 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 flex items-center justify-center transition-colors"
-                  >
-                    <Download :size="18" class="text-white" />
-                  </button>
                 </div>
               </div>
             </div>
 
             <!-- Reviewer Comments -->
-            <div v-if="(detailMode === 'revision' || detailMode === 'accepted' || detailMode === 'rejected')" class="mt-6">
+            <div v-if="(detailMode === 'revision_required' || detailMode === 'accepted' || detailMode === 'rejected')" class="mt-6">
               <div class="text-[11px] font-extrabold tracking-[0.14em] text-slate-400">REVIEWER COMMENTS</div>
               <div class="mt-3 space-y-3">
                 <div class="rounded-[22px] border border-slate-200 bg-white p-4">
@@ -661,10 +852,10 @@ const getAuthorName = (article) => {
             </div>
 
             <!-- Contextual Actions -->
-            <div v-if="detailMode === 'revision'" class="mt-8">
+            <div v-if="detailMode === 'revision_required'" class="mt-8">
               <button
-                @click="openUploadModalForArticle(detailArticle)"
-                class="w-full h-14 rounded-2xl bg-orange-600 text-white font-black text-[15px] shadow-lg shadow-orange-200/60 hover:bg-orange-700 transition-all active:scale-[0.98] inline-flex items-center justify-center gap-2"
+                @click="() => { closeDetail(); openUploadModalForArticle(detailArticle); }"
+                class="w-full h-14 rounded-[20px] bg-purple-600 text-white font-extrabold shadow-xl shadow-purple-500/30 hover:bg-purple-700 hover:-translate-y-0.5 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
               >
                 <UploadCloud :size="20" />
                 อัปโหลดไฟล์แก้ไข

@@ -12,7 +12,7 @@ async function checkSettingsTable() {
   if (error) {
     console.log('Error or table does not exist:', error.message);
   } else {
-    console.log('System settings data:', data);
+    console.dir(data[0]?.config_json, { depth: null });
   }
 }
 

@@ -11,6 +11,17 @@ const papers = ref([]);
 const activeTab = ref('permissions'); // 'permissions' | 'scores'
 const sortKey = ref('avg_score');
 const sortDir = ref('desc');
+const filterYear = ref('all');
+const activeAcademicYear = ref(null);
+
+const fetchSettings = async () => {
+  const { data } = await supabase.from('system_settings').select('config_json').single();
+  if (data?.config_json?.conference) {
+    const conf = data.config_json.conference;
+    activeAcademicYear.value = conf.academicYear || conf.year || new Date().getFullYear();
+    if (filterYear.value === 'all') filterYear.value = String(activeAcademicYear.value);
+  }
+};
 
 // ─── Load Reviewers ───
 const loadReviewers = async () => {
@@ -83,6 +94,7 @@ const loadScores = async () => {
 
 const loadAll = async () => {
   loading.value = true;
+  await fetchSettings();
   await Promise.all([loadReviewers(), loadScores()]);
   loading.value = false;
 };
@@ -128,8 +140,24 @@ const togglePhase2 = async (reviewer) => {
 // ─── Score table ───
 const phase2Reviewers = computed(() => reviewers.value.filter(r => r.can_evaluate_phase_2));
 
+const yearOptions = computed(() => {
+  const years = new Set();
+  if (activeAcademicYear.value) years.add(String(activeAcademicYear.value));
+  papers.value.forEach(p => {
+    if (p.paper_code) {
+      const match = p.paper_code.match(/-(\d{2})/);
+      if (match) years.add('20' + match[1]);
+    }
+  });
+  return Array.from(years).sort((a, b) => Number(b) - Number(a));
+});
+
 const sortedPapers = computed(() => {
-  const arr = [...papers.value];
+  let arr = [...papers.value];
+  if (filterYear.value !== 'all') {
+    const yy = filterYear.value.slice(-2);
+    arr = arr.filter(p => p.paper_code && p.paper_code.includes(`-${yy}`));
+  }
   arr.sort((a, b) => sortDir.value === 'desc' ? (b[sortKey.value] ?? 0) - (a[sortKey.value] ?? 0) : (a[sortKey.value] ?? 0) - (b[sortKey.value] ?? 0));
   return arr;
 });
@@ -153,6 +181,7 @@ const scoreColor = (score) => {
 </script>
 
 <template>
+  <ClientOnly>
   <div class="p-8 pb-20 animate-fade-in">
     <!-- Header -->
     <div class="flex items-center justify-between mb-8">
@@ -160,10 +189,20 @@ const scoreColor = (score) => {
         <h1 class="text-2xl font-black text-slate-900 tracking-tight">Phase 2 — สิทธิ์ & คะแนน</h1>
         <p class="text-sm text-slate-500 mt-1">กำหนดสิทธิ์กรรมการและดูสรุปคะแนนการนำเสนอ On-site</p>
       </div>
-      <button @click="loadAll" class="flex items-center gap-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-4 py-2.5 rounded-xl transition-all">
-        <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
-        รีเฟรช
-      </button>
+      <div class="flex items-center gap-4">
+        <!-- Year Filter -->
+        <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm">
+          <span class="text-xs font-black text-slate-500 uppercase tracking-widest">Year:</span>
+          <select v-model="filterYear" class="text-sm font-black text-slate-800 bg-transparent focus:outline-none border-none">
+            <option value="all">All</option>
+            <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+          </select>
+        </div>
+        <button @click="loadAll" class="flex items-center gap-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-4 py-2.5 rounded-xl transition-all">
+          <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
+          รีเฟรช
+        </button>
+      </div>
     </div>
 
     <!-- Tabs -->
@@ -255,7 +294,7 @@ const scoreColor = (score) => {
         <div class="grid grid-cols-3 gap-5 mb-6">
           <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">บทความที่มีคะแนน</p>
-            <p class="text-3xl font-black text-slate-900 mt-1 font-['Lato']">{{ papers.length }}</p>
+            <p class="text-3xl font-black text-slate-900 mt-1 font-['Lato']">{{ sortedPapers.length }}</p>
           </div>
           <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
             <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">กรรมการ Phase 2</p>
@@ -363,4 +402,5 @@ const scoreColor = (score) => {
       </div>
     </div>
   </div>
+  </ClientOnly>
 </template>

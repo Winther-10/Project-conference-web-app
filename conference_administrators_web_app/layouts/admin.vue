@@ -18,8 +18,8 @@ const settingsState = useState('system_settings');
 // Load settings if not already present
 onMounted(async () => {
   if (!settingsState.value) {
-    const { data } = await supabase.from('settings').select('*').single();
-    if (data) settingsState.value = data;
+    const { data } = await supabase.from('system_settings').select('config_json').eq('id', 1).maybeSingle();
+    if (data?.config_json) settingsState.value = data.config_json;
   }
 });
 

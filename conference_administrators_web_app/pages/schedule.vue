@@ -11,6 +11,8 @@ const supabase = useSupabase();
 const papers = ref([]);
 const rooms = ref([]);
 const isLoading = ref(true);
+const filterYear = ref('all');
+const allSchedules = ref([]);
 
 const loadData = async () => {
   isLoading.value = true;
@@ -21,6 +23,14 @@ const loadData = async () => {
     
     if (papersError) throw papersError;
     
+    // Load settings
+    const { data: settingsData } = await supabase.from('system_settings').select('config_json').eq('id', 1).maybeSingle();
+    if (settingsData && settingsData.config_json) {
+      const conf = settingsData.config_json.conference;
+      const currentYear = String(conf?.academicYear || conf?.year || new Date().getFullYear());
+      if (filterYear.value === 'all') filterYear.value = currentYear;
+    }
+
     papers.value = (papersData || []).map(p => ({
       id: p.paper_id,
       code: p.paper_code,
@@ -37,39 +47,68 @@ const loadData = async () => {
       .order('start_time', { ascending: true });
 
     if (schedError) throw schedError;
+    allSchedules.value = schedData || [];
 
-    // Group by room_name
-    const roomsMap = {};
-    (schedData || []).forEach(s => {
-      const roomKey = s.room_name || 'General';
-      if (!roomsMap[roomKey]) {
-        roomsMap[roomKey] = {
-          id: roomKey,
-          name: roomKey,
-          track: '', 
-          dateLabel: '17 ต.ค. 69', 
-          eventMode: 'On-site',
-          chair: '—',
-          committee: [],
-          startTime: s.start_time ? new Date(s.start_time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '09:00',
-          minutesPerPaper: 15,
-          breakMinutes: 0,
-          queue: []
-        };
-      }
-      roomsMap[roomKey].queue.push({
-        paperId: s.paper_id,
-        mode: 'onsite'
-      });
-    });
-
-    rooms.value = Object.values(roomsMap);
+    updateRoomsFromSchedules();
   } catch (err) {
     console.error('Error loading papers for schedule:', err);
   } finally {
     isLoading.value = false;
   }
 };
+
+const yearOptions = computed(() => {
+  const years = new Set();
+  papers.value.forEach(p => {
+    if (p.code) {
+      const match = p.code.match(/-(\d{2})/);
+      if (match) years.add('20' + match[1]);
+    }
+  });
+  return Array.from(years).sort((a, b) => b - a);
+});
+
+const filteredPapers = computed(() => {
+  if (filterYear.value === 'all') return papers.value;
+  const yy = filterYear.value.slice(-2);
+  return papers.value.filter(p => p.code && p.code.includes(`-${yy}`));
+});
+
+const updateRoomsFromSchedules = () => {
+  // Group by room_name, but only for filtered papers
+  const paperIdSet = new Set(filteredPapers.value.map(p => p.id));
+  const filteredScheds = allSchedules.value.filter(s => paperIdSet.has(s.paper_id));
+
+  const roomsMap = {};
+  filteredScheds.forEach(s => {
+    const roomKey = s.room_name || 'General';
+    if (!roomsMap[roomKey]) {
+      roomsMap[roomKey] = {
+        id: roomKey,
+        name: roomKey,
+        track: '', 
+        dateLabel: '17 ต.ค. 69', 
+        eventMode: 'On-site',
+        chair: '—',
+        committee: [],
+        startTime: s.start_time ? new Date(s.start_time).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '09:00',
+        minutesPerPaper: 15,
+        breakMinutes: 0,
+        queue: []
+      };
+    }
+    roomsMap[roomKey].queue.push({
+      paperId: s.paper_id,
+      mode: 'onsite'
+    });
+  });
+
+  rooms.value = Object.values(roomsMap);
+};
+
+watch(filterYear, () => {
+  updateRoomsFromSchedules();
+});
 
 const isSaving = ref(false);
 const saveAllSchedules = async () => {
@@ -100,9 +139,15 @@ const saveAllSchedules = async () => {
 
     console.log('Attempting to save schedules:', rows);
 
-    // Clear existing and insert new (simple sync strategy)
-    const { error: deleteError } = await supabase.from('schedules').delete().not('room_name', 'is', null);
-    if (deleteError) throw deleteError;
+    // Clear existing for THIS YEAR and insert new
+    const paperIdsToClear = filteredPapers.value.map(p => p.id);
+    if (paperIdsToClear.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('schedules')
+        .delete()
+        .in('paper_id', paperIdsToClear);
+      if (deleteError) throw deleteError;
+    }
 
     if (rows.length > 0) {
       const { error: insertError } = await supabase.from('schedules').insert(rows);
@@ -131,7 +176,7 @@ const leftPapers = computed(() => {
     for (const item of r.queue || []) scheduledIds.add(item.paperId);
   }
 
-  return papers.value
+  return filteredPapers.value
     .filter((p) => p.decision === 'accepted' || p.decision === 'published')
     .filter((p) => !scheduledIds.has(p.id))
     .filter((p) => !q || p.title.toLowerCase().includes(q) || p.id.toLowerCase().includes(q));
@@ -345,6 +390,7 @@ const paperById = (paperId) => papers.value.find((p) => p.id === paperId) || nul
 </script>
 
 <template>
+  <ClientOnly>
   <div class="p-8 pb-20 font-['Sarabun'] animate-fade-in">
     <div>
         <div class="mb-6 flex items-start justify-between gap-4">
@@ -353,6 +399,13 @@ const paperById = (paperId) => papers.value.find((p) => p.id === paperId) || nul
             <p class="text-sm text-slate-500">ตารางนี้กำหนดให้เป็น On-site ทั้งหมด บทความฝั่งซ้ายจะแสดงเฉพาะสถานะ Accepted</p>
           </div>
           <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 h-10">
+              <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Year:</span>
+              <select v-model="filterYear" class="text-xs font-black text-slate-800 bg-transparent focus:outline-none border-none">
+                <option value="all">All Years</option>
+                <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+              </select>
+            </div>
             <button type="button" class="h-10 px-6 rounded-xl bg-emerald-600 text-white text-xs font-black hover:bg-emerald-700 inline-flex items-center gap-2 shadow-lg shadow-emerald-100 transition-all active:scale-95" @click="saveAllSchedules" :disabled="isSaving">
               <RefreshCw class="w-4 h-4" :class="isSaving ? 'animate-spin' : ''" />
               {{ isSaving ? 'กำลังบันทึก...' : 'บันทึกตารางทั้งหมด' }}
@@ -706,4 +759,5 @@ const paperById = (paperId) => papers.value.find((p) => p.id === paperId) || nul
       </div>
     </Teleport>
   </div>
+  </ClientOnly>
 </template>

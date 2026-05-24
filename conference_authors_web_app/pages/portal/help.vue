@@ -17,7 +17,18 @@ import {
   Mail,
   MapPin,
   Calendar,
-  Trophy
+  Trophy,
+  LifeBuoy,
+  BookOpen,
+  MessageSquareMore,
+  FileDown,
+  PhoneCall,
+  Bell,
+  BarChart3,
+  Archive,
+  DownloadCloud,
+  Printer,
+  Facebook
 } from 'lucide-vue-next';
 
 const query = ref('');
@@ -29,7 +40,11 @@ const topics = [
   { id: 'registration', label: 'สมัคร', icon: Users, tint: 'bg-purple-50 border-purple-200 text-purple-700' },
   { id: 'submission', label: 'ส่งงาน', icon: FileText, tint: 'bg-blue-50 border-blue-200 text-blue-700' },
   { id: 'schedule', label: 'ตาราง', icon: Calendar, tint: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-  { id: 'awards', label: 'รางวัล', icon: Trophy, tint: 'bg-amber-50 border-amber-200 text-amber-800' }
+  { id: 'awards', label: 'รางวัล', icon: Trophy, tint: 'bg-amber-50 border-amber-200 text-amber-800' },
+  { id: 'notifications', label: 'แจ้งเตือน', icon: Bell, tint: 'bg-rose-50 border-rose-200 text-rose-700' },
+  { id: 'statistics', label: 'สถิติ', icon: BarChart3, tint: 'bg-indigo-50 border-indigo-200 text-indigo-700' },
+  { id: 'archives', label: 'คลังบทความ', icon: Archive, tint: 'bg-slate-50 border-slate-200 text-slate-700' },
+  { id: 'downloads', label: 'ดาวน์โหลด', icon: DownloadCloud, tint: 'bg-teal-50 border-teal-200 text-teal-700' }
 ];
 
 const faqs = [
@@ -67,6 +82,34 @@ const faqs = [
     q: 'ตรวจสอบการประกาศผลรางวัลได้ที่ไหน?',
     a: 'คุณสามารถตรวจสอบรายชื่อบทความที่ได้รับรางวัลได้ที่เมนู "รางวัลและเกียรติบัตร" หากได้รับรางวัล สามารถดาวน์โหลดเกียรติบัตรอิเล็กทรอนิกส์ได้จากหน้านั้นทันที',
     actions: [{ label: 'ไปที่หน้ารางวัล', to: '/portal/awards' }]
+  },
+  {
+    id: 'faq-008',
+    topic: 'notifications',
+    q: 'ทำไมถึงไม่ได้รับการแจ้งเตือน?',
+    a: 'ระบบแจ้งเตือนจะทำงานเมื่อมีการอัปเดตสถานะจาก Admin (เช่น รอตรวจสอบ, ต้องแก้ไข, ตอบรับบทความ) หรือเมื่อคุณเพิ่งเข้าสู่ระบบครั้งแรก หากพบปัญหา ให้ลองรีเฟรชหน้าต่าง (F5)',
+    actions: []
+  },
+  {
+    id: 'faq-009',
+    topic: 'statistics',
+    q: 'ข้อมูลในหน้าสถิติคืออะไรบ้าง?',
+    a: 'หน้าสถิติจะแสดงจำนวนผู้อ่านบทความของคุณ สถิติการดาวน์โหลด และคะแนนหรือความเห็นจาก Reviewer เพื่อให้คุณเห็นผลตอบรับของผลงานตนเองได้อย่างชัดเจน',
+    actions: [{ label: 'ไปที่หน้าสถิติ', to: '/portal/statistics' }]
+  },
+  {
+    id: 'faq-010',
+    topic: 'archives',
+    q: 'คลังบทความคืออะไร?',
+    a: 'คลังบทความ (Archives) ใช้สำหรับรวบรวมและสืบค้นบทความที่ตีพิมพ์ในงานประชุมปีก่อนๆ คุณสามารถค้นหางานวิจัยที่น่าสนใจและอ้างอิงได้จากหน้านี้',
+    actions: [{ label: 'ไปที่คลังบทความ', to: '/portal/archives' }]
+  },
+  {
+    id: 'faq-011',
+    topic: 'downloads',
+    q: 'ดาวน์โหลดไฟล์ Template ได้ที่ไหน?',
+    a: 'ไฟล์ Template เอกสารต่างๆ และคู่มือ (Author Manual) สามารถดาวน์โหลดได้ที่หน้า “ดาวน์โหลด”',
+    actions: [{ label: 'ไปที่ดาวน์โหลด', to: '/portal/downloads' }]
   }
 ];
 
@@ -113,9 +156,12 @@ const selectSuggestion = (id) => {
 <template>
   <div class="flex-1 overflow-y-auto px-6 pt-8 pb-32 no-scrollbar animate-in fade-in duration-300 max-w-6xl mx-auto">
     <header class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-7">
-      <div class="min-w-0">
-        <div class="text-2xl font-black text-slate-900 truncate">💬 ศูนย์ช่วยเหลือและติดต่อ (Help Center & Support)</div>
-        <div class="mt-1 text-sm font-semibold text-slate-500 truncate">มีปัญหาการใช้งาน? ค้นหาคำตอบหรือติดต่อทีมงานได้ที่นี่</div>
+      <div class="flex items-center gap-3 min-w-0">
+        <LifeBuoy class="w-8 h-8 text-slate-900" />
+        <div class="min-w-0">
+          <div class="text-2xl font-black text-slate-900 truncate">ศูนย์ช่วยเหลือและติดต่อ (Help Center & Support)</div>
+          <div class="mt-1 text-sm font-semibold text-slate-500 truncate">มีปัญหาการใช้งาน? ค้นหาคำตอบหรือติดต่อทีมงานได้ที่นี่</div>
+        </div>
       </div>
     </header>
 
@@ -169,7 +215,10 @@ const selectSuggestion = (id) => {
         <section class="space-y-3">
           <div class="flex items-end justify-between gap-4">
             <div>
-              <div class="text-base font-black text-slate-900">📚 เลือกหัวข้อ (Topics)</div>
+              <div class="flex items-center gap-2 text-base font-black text-slate-900">
+                <BookOpen class="w-5 h-5 text-purple-600" />
+                เลือกหัวข้อ (Topics)
+              </div>
               <div class="mt-1 text-xs font-semibold text-slate-500">เลือกหมวดเพื่อกรอง FAQ ให้ตรงปัญหา</div>
             </div>
 
@@ -213,7 +262,10 @@ const selectSuggestion = (id) => {
         <section class="space-y-3">
           <div class="flex items-end justify-between gap-4">
             <div>
-              <div class="text-base font-black text-slate-900">❓ คำถามที่พบบ่อย (FAQ)</div>
+              <div class="flex items-center gap-2 text-base font-black text-slate-900">
+                <MessageSquareMore class="w-5 h-5 text-blue-600" />
+                คำถามที่พบบ่อย (FAQ)
+              </div>
               <div class="mt-1 text-xs font-semibold text-slate-500">คลิกเพื่อดูคำตอบแบบยืด-หด</div>
             </div>
             <div class="text-xs font-black text-slate-500">{{ visibleFaqs.length }} รายการ</div>
@@ -260,7 +312,10 @@ const selectSuggestion = (id) => {
         <section class="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-base font-black text-slate-900">📥 ดาวน์โหลดคู่มือฉบับเต็ม</div>
+              <div class="flex items-center gap-2 text-base font-black text-slate-900">
+                <FileDown class="w-5 h-5 text-emerald-600" />
+                ดาวน์โหลดคู่มือฉบับเต็ม
+              </div>
               <div class="mt-1 text-xs font-semibold text-slate-500">Author Manual (PDF) (5 MB)</div>
             </div>
             <NuxtLink
@@ -276,81 +331,63 @@ const selectSuggestion = (id) => {
 
       <aside class="xl:col-span-3 space-y-4">
         <div class="rounded-3xl bg-white border border-slate-200 p-5 shadow-sm">
-          <div class="text-base font-black text-slate-900">📞 ติดต่อเรา (Contact Us)</div>
+          <div class="flex items-center gap-2 text-base font-black text-slate-900">
+            <PhoneCall class="w-5 h-5 text-rose-600" />
+            ติดต่อเรา (Contact Us)
+          </div>
           <div class="mt-1 text-xs font-semibold text-slate-500">Direct Support เมื่อแก้ปัญหาเองไม่ได้</div>
 
           <div class="mt-4 space-y-3">
             <div class="rounded-2xl bg-slate-50 border border-slate-200 p-3">
               <div class="flex items-center gap-2">
                 <Phone class="w-4 h-4 text-slate-600" />
-                <div class="text-xs font-black text-slate-700">044-123-4567</div>
+                <div class="text-xs font-black text-slate-700">044-611221-6611, 6612</div>
+              </div>
+            </div>
+            <div class="rounded-2xl bg-slate-50 border border-slate-200 p-3">
+              <div class="flex items-center gap-2">
+                <Printer class="w-4 h-4 text-slate-600" />
+                <div class="text-xs font-black text-slate-700">044-611221-858</div>
               </div>
             </div>
             <div class="rounded-2xl bg-slate-50 border border-slate-200 p-3">
               <div class="flex items-center gap-2">
                 <Mail class="w-4 h-4 text-slate-600" />
-                <div class="text-xs font-black text-slate-700">ic-sci@bru.ac.th</div>
+                <div class="text-xs font-black text-slate-700">comsci_bru@hotmail.com</div>
               </div>
             </div>
-            <div class="rounded-2xl bg-slate-50 border border-slate-200 p-3">
-              <div class="text-xs font-black text-slate-700">LINE Official</div>
-              <div class="mt-1 text-[11px] font-semibold text-slate-500">@icsci2026</div>
-              <div class="mt-3 rounded-2xl bg-white border border-slate-200 p-3">
-                <div class="text-[10px] font-black text-slate-500">QR Code (Placeholder)</div>
-                <svg viewBox="0 0 120 120" class="w-full h-28 mt-2">
-                  <rect width="120" height="120" fill="#fff" />
-                  <rect x="8" y="8" width="32" height="32" fill="#0f172a" />
-                  <rect x="14" y="14" width="20" height="20" fill="#fff" />
-                  <rect x="20" y="20" width="8" height="8" fill="#0f172a" />
-
-                  <rect x="80" y="8" width="32" height="32" fill="#0f172a" />
-                  <rect x="86" y="14" width="20" height="20" fill="#fff" />
-                  <rect x="92" y="20" width="8" height="8" fill="#0f172a" />
-
-                  <rect x="8" y="80" width="32" height="32" fill="#0f172a" />
-                  <rect x="14" y="86" width="20" height="20" fill="#fff" />
-                  <rect x="20" y="92" width="8" height="8" fill="#0f172a" />
-
-                  <rect x="52" y="52" width="8" height="8" fill="#0f172a" />
-                  <rect x="64" y="52" width="8" height="8" fill="#0f172a" />
-                  <rect x="52" y="64" width="8" height="8" fill="#0f172a" />
-                  <rect x="72" y="64" width="8" height="8" fill="#0f172a" />
-                  <rect x="64" y="72" width="8" height="8" fill="#0f172a" />
-
-                  <rect x="48" y="24" width="8" height="8" fill="#0f172a" />
-                  <rect x="60" y="24" width="8" height="8" fill="#0f172a" />
-                  <rect x="72" y="24" width="8" height="8" fill="#0f172a" />
-
-                  <rect x="48" y="36" width="8" height="8" fill="#0f172a" />
-                  <rect x="60" y="36" width="8" height="8" fill="#0f172a" />
-                  <rect x="72" y="36" width="8" height="8" fill="#0f172a" />
-
-                  <rect x="48" y="84" width="8" height="8" fill="#0f172a" />
-                  <rect x="60" y="84" width="8" height="8" fill="#0f172a" />
-                  <rect x="72" y="84" width="8" height="8" fill="#0f172a" />
-                </svg>
+            <a href="https://www.facebook.com/comsci.bru" target="_blank" rel="noopener noreferrer" class="rounded-2xl bg-slate-50 border border-slate-200 p-3 hover:bg-slate-100 transition-colors block">
+              <div class="flex items-center gap-2">
+                <Facebook class="w-4 h-4 text-blue-600" />
+                <div class="text-xs font-black text-slate-700 flex items-center gap-1">
+                  วิทยาการคอมพิวเตอร์ ราชภัฏบุรีรัมย์
+                  <ExternalLink class="w-3 h-3 text-slate-400" />
+                </div>
               </div>
-            </div>
+            </a>
           </div>
         </div>
 
         <div class="rounded-3xl bg-white border border-slate-200 overflow-hidden shadow-sm">
-          <div class="p-5 border-b border-slate-200">
-            <div class="flex items-center gap-2">
-              <MapPin class="w-5 h-5 text-slate-600" />
+          <a href="https://maps.google.com/?q=มหาวิทยาลัยราชภัฏบุรีรัมย์+อาคาร+5+สาขาวิชาวิทยาการคอมพิวเตอร์" target="_blank" rel="noopener noreferrer" class="p-5 border-b border-slate-200 hover:bg-slate-50 transition-colors block">
+            <div class="flex items-start gap-2">
+              <MapPin class="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
               <div>
-                <div class="text-base font-black text-slate-900">📍 แผนที่ (Location)</div>
-                <div class="mt-1 text-xs font-semibold text-slate-500">อาคาร 24 ชั้น 2</div>
+                <div class="text-base font-black text-slate-900 flex items-center gap-1.5">
+                  แผนที่ (Location)
+                  <ExternalLink class="w-3.5 h-3.5 text-slate-400" />
+                </div>
+                <div class="mt-1 text-[11px] font-semibold text-slate-500 leading-snug">มหาวิทยาลัยราชภัฏบุรีรัมย์ อาคาร 5 ชั้น 2 สาขาวิชาวิทยาการคอมพิวเตอร์ 439 ถนน จิระ ตำบลในเมือง อำเภอเมือง จังหวัดบุรีรัมย์ 31000</div>
               </div>
             </div>
-          </div>
+          </a>
           <div class="aspect-[4/3] bg-slate-100">
             <iframe
               title="BRICC Location"
               class="w-full h-full"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
-              src="https://www.google.com/maps?q=Buriram+Rajabhat+University&output=embed"
+              src="https://www.google.com/maps?q=มหาวิทยาลัยราชภัฏบุรีรัมย์+อาคาร+5&output=embed"
             />
           </div>
         </div>

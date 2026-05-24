@@ -2,7 +2,8 @@
 definePageMeta({ layout: 'portal' });
 import { ref, computed, onMounted } from 'vue';
 import {
-  Search, Download, Lock, FileText, File as FileIcon, BookOpen, Bell, User, ChevronDown
+  Search, Download, Lock, FileText, File as FileIcon, BookOpen, Bell, User, ChevronDown,
+  FileSpreadsheet, Image as ImageIcon
 } from 'lucide-vue-next';
 import { useAuth } from '~/composables/useAuth';
 import { useSupabase } from '~/composables/useSupabase';
@@ -27,11 +28,44 @@ const downloadBlob = (filename, mime, content) => {
   URL.revokeObjectURL(url);
 };
 
+const getExtensionFromUrl = (url, fallback = 'pdf') => {
+  if (!url) return fallback;
+  try {
+    const pathname = new URL(url).pathname;
+    const parts = pathname.split('.');
+    if (parts.length > 1) {
+      const ext = parts.pop().toLowerCase();
+      if (['pdf', 'docx', 'doc', 'zip', 'rar', '7z', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+        if (['doc', 'docx'].includes(ext)) return 'docx';
+        if (['zip', 'rar', '7z'].includes(ext)) return 'latex';
+        if (['xls', 'xlsx'].includes(ext)) return 'excel';
+        if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) return 'image';
+        return ext;
+      }
+    }
+  } catch (e) {
+    const parts = url.split('?')[0].split('.');
+    if (parts.length > 1) {
+      const ext = parts.pop().toLowerCase();
+      if (['pdf', 'docx', 'doc', 'zip', 'rar', '7z', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'webp'].includes(ext)) {
+        if (['doc', 'docx'].includes(ext)) return 'docx';
+        if (['zip', 'rar', '7z'].includes(ext)) return 'latex';
+        if (['xls', 'xlsx'].includes(ext)) return 'excel';
+        if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) return 'image';
+        return ext;
+      }
+    }
+  }
+  return fallback;
+};
+
 const fileKindMeta = {
   docx: { label: 'DOCX', pill: 'bg-blue-50 border-blue-200 text-blue-700', icon: FileText },
   latex: { label: 'ZIP', pill: 'bg-emerald-50 border-emerald-200 text-emerald-700', icon: FileIcon },
   pdf: { label: 'PDF', pill: 'bg-rose-50 border-rose-200 text-rose-700', icon: FileText },
-  manual: { label: 'PDF', pill: 'bg-slate-50 border-slate-200 text-slate-700', icon: BookOpen }
+  manual: { label: 'PDF', pill: 'bg-slate-50 border-slate-200 text-slate-700', icon: BookOpen },
+  excel: { label: 'EXCEL', pill: 'bg-teal-50 border-teal-200 text-teal-700', icon: FileSpreadsheet },
+  image: { label: 'IMAGE', pill: 'bg-violet-50 border-violet-200 text-violet-700', icon: ImageIcon }
 };
 
 const statusMeta = {
@@ -70,15 +104,25 @@ const fetchData = async () => {
         .order('created_at', { ascending: false });
 
       if (!docError && officialDocs) {
-        myDocs.value = officialDocs.map(d => ({
-          id: d.id,
-          titleTh: d.title_th,
-          titleEn: d.title_en,
-          status: 'available',
-          filename: d.title_th + '.pdf',
-          url: d.file_url,
-          type: d.document_type
-        }));
+        myDocs.value = officialDocs.map(d => {
+          const ext = getExtensionFromUrl(d.file_url, 'pdf');
+          let articleRef = '';
+          const match = d.title_th.match(/^\[([^\]]+)\]/);
+          if (match) {
+            articleRef = match[1];
+          }
+          return {
+            id: d.id,
+            titleTh: d.title_th,
+            titleEn: d.title_en,
+            status: 'available',
+            filename: d.title_th.endsWith('.' + ext) ? d.title_th : d.title_th + '.' + ext,
+            url: d.file_url,
+            type: d.document_type,
+            kind: ext,
+            articleRef: articleRef
+          };
+        });
       }
     }
   } catch (error) {
@@ -203,8 +247,8 @@ const getStatusMeta = (status) => statusMeta[status] || statusMeta.locked;
               <div v-for="d in filteredMyDocs" :key="d.id" class="grid grid-cols-12 gap-4 px-8 py-6 items-center hover:bg-slate-50/50 transition-colors">
                 <div class="col-span-7 min-w-0">
                   <div class="flex items-start gap-4">
-                    <div class="w-12 h-12 rounded-2xl bg-white border border-slate-200 shadow-sm flex items-center justify-center flex-shrink-0">
-                      <FileText class="w-5 h-5 text-slate-400" />
+                    <div :class="['w-12 h-12 rounded-2xl border flex items-center justify-center flex-shrink-0 shadow-sm transition-colors duration-300', getFileKindMeta(d.kind).pill]">
+                      <component :is="getFileKindMeta(d.kind).icon" class="w-5 h-5" />
                     </div>
                     <div class="min-w-0">
                       <div class="text-[15px] font-black text-slate-900 truncate">{{ d.titleTh }}</div>

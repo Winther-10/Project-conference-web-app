@@ -1,19 +1,23 @@
 <script setup>
 definePageMeta({ layout: 'portal' });
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { 
   ArrowLeft, ChevronLeft, ChevronRight, Plus, Check, FileText, Users, 
-  UploadCloud, Send, X, FileUp, AlertCircle
+  UploadCloud, Send, X, FileUp, AlertCircle, Trash2, GripVertical,
+  ChevronDown, Search, GraduationCap, UserPlus, FileImage
 } from 'lucide-vue-next';
 import { useAuth } from '~/composables/useAuth';
 import { useSupabase } from '~/composables/useSupabase';
+import { useNotifications } from '~/composables/useNotifications';
+import { PREFIXES, THAI_UNIVERSITIES } from '~/utils/constants';
 
 const Rocket = Send;
 
 const router = useRouter();
 const { userProfile } = useAuth();
 const supabase = useSupabase();
+const { createNotification } = useNotifications();
 
 const currentStep = ref(1);
 const steps = [
@@ -22,6 +26,157 @@ const steps = [
   { id: 3, label: 'บทคัดย่อ' },
   { id: 4, label: 'อัปโหลดไฟล์' },
 ];
+
+// ========== Author Management ==========
+const AUTHOR_ROLES = [
+  'First Author (ผู้เขียนชื่อแรก / ผู้เขียนหลัก)',
+  'Corresponding Author (ผู้เขียนประสานงาน / ผู้รับผิดชอบบทความ)',
+  'Co-Author / Co-Researcher (ผู้เขียนร่วม / ผู้ร่วมวิจัย)',
+  'Senior Author / Last Author (ผู้เขียนลำดับสุดท้าย)',
+];
+
+const showAuthorForm = ref(false);
+const editingAuthorIdx = ref(-1);
+const authorForm = reactive({
+  prefix: '', firstName: '', lastName: '', email: '', institution: '', role: AUTHOR_ROLES[2], isPresenting: false
+});
+
+// Searchable dropdown states
+const prefixSearch = ref('');
+const prefixDropdownOpen = ref(false);
+const instSearch = ref('');
+const instDropdownOpen = ref(false);
+
+const filteredPrefixes = computed(() => {
+  const q = prefixSearch.value.toLowerCase();
+  if (!q) return PREFIXES;
+  return PREFIXES.filter(p => p.toLowerCase().includes(q));
+});
+
+const filteredInstitutions = computed(() => {
+  const q = instSearch.value.toLowerCase();
+  if (!q) return THAI_UNIVERSITIES;
+  return THAI_UNIVERSITIES.filter(u => u.toLowerCase().includes(q));
+});
+
+const selectPrefix = (val) => {
+  authorForm.prefix = val;
+  prefixSearch.value = val;
+  prefixDropdownOpen.value = false;
+};
+
+const selectInstitution = (val) => {
+  authorForm.institution = val;
+  instSearch.value = val;
+  instDropdownOpen.value = false;
+};
+
+const resetAuthorForm = () => {
+  authorForm.prefix = ''; authorForm.firstName = ''; authorForm.lastName = '';
+  authorForm.email = ''; authorForm.institution = ''; authorForm.role = AUTHOR_ROLES[2];
+  authorForm.isPresenting = false;
+  prefixSearch.value = ''; instSearch.value = '';
+  editingAuthorIdx.value = -1;
+  showAuthorForm.value = false;
+};
+
+const openAddAuthorForm = () => {
+  resetAuthorForm();
+  showAuthorForm.value = true;
+};
+
+const openEditAuthorForm = (idx) => {
+  const a = formData.authors[idx];
+  authorForm.prefix = a.prefix; authorForm.firstName = a.firstName;
+  authorForm.lastName = a.lastName; authorForm.email = a.email;
+  authorForm.institution = a.institution; authorForm.role = a.role;
+  authorForm.isPresenting = a.isPresenting || false;
+  prefixSearch.value = a.prefix; instSearch.value = a.institution;
+  editingAuthorIdx.value = idx;
+  showAuthorForm.value = true;
+};
+
+const saveAuthor = () => {
+  if (!authorForm.firstName.trim() || !authorForm.lastName.trim() || !authorForm.institution.trim()) return;
+  const entry = { ...authorForm };
+  if (editingAuthorIdx.value >= 0) {
+    formData.authors[editingAuthorIdx.value] = entry;
+  } else {
+    formData.authors.push(entry);
+  }
+  resetAuthorForm();
+};
+
+const removeAuthor = (idx) => { formData.authors.splice(idx, 1); };
+const moveAuthor = (idx, dir) => {
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= formData.authors.length) return;
+  const tmp = formData.authors[idx];
+  formData.authors[idx] = formData.authors[newIdx];
+  formData.authors[newIdx] = tmp;
+};
+
+
+
+// Close dropdowns on outside click
+onMounted(() => {
+  window.addEventListener('click', (e) => {
+    if (!e.target.closest('.dropdown-container')) {
+      prefixDropdownOpen.value = false;
+      instDropdownOpen.value = false;
+      advPrefixDropdownOpen.value = false;
+      advInstDropdownOpen.value = false;
+      advRoleDropdownOpen.value = false;
+    }
+  });
+});
+
+// ========== Advisor Section ==========
+const advisors = reactive([]);
+const showAdvisorForm = ref(false);
+const advisorForm = reactive({ prefix: '', firstName: '', lastName: '', institution: '', role: 'อาจารย์ที่ปรึกษาหลัก', email: '' });
+const advPrefixSearch = ref('');
+const advPrefixDropdownOpen = ref(false);
+const advInstSearch = ref('');
+const advInstDropdownOpen = ref(false);
+const advRoleSearch = ref('อาจารย์ที่ปรึกษาหลัก');
+const advRoleDropdownOpen = ref(false);
+
+const ADV_ROLES = ['อาจารย์ที่ปรึกษาหลัก', 'อาจารย์ที่ปรึกษาร่วม', 'ที่ปรึกษา'];
+
+const filteredAdvPrefixes = computed(() => {
+  const q = advPrefixSearch.value.toLowerCase();
+  if (!q) return PREFIXES;
+  return PREFIXES.filter(p => p.toLowerCase().includes(q));
+});
+const filteredAdvInstitutions = computed(() => {
+  const q = advInstSearch.value.toLowerCase();
+  if (!q) return THAI_UNIVERSITIES;
+  return THAI_UNIVERSITIES.filter(u => u.toLowerCase().includes(q));
+});
+const filteredAdvRoles = computed(() => {
+  const q = advRoleSearch.value.toLowerCase();
+  if (!q) return ADV_ROLES;
+  return ADV_ROLES.filter(r => r.toLowerCase().includes(q));
+});
+
+const selectAdvPrefix = (val) => { advisorForm.prefix = val; advPrefixSearch.value = val; advPrefixDropdownOpen.value = false; };
+const selectAdvInstitution = (val) => { advisorForm.institution = val; advInstSearch.value = val; advInstDropdownOpen.value = false; };
+const selectAdvRole = (val) => { advisorForm.role = val; advRoleSearch.value = val; advRoleDropdownOpen.value = false; };
+
+const resetAdvisorForm = () => {
+  advisorForm.prefix = ''; advisorForm.firstName = ''; advisorForm.lastName = '';
+  advisorForm.institution = ''; advisorForm.email = ''; advisorForm.role = 'อาจารย์ที่ปรึกษาหลัก';
+  advPrefixSearch.value = ''; advInstSearch.value = ''; advRoleSearch.value = 'อาจารย์ที่ปรึกษาหลัก';
+  showAdvisorForm.value = false;
+};
+
+const saveAdvisor = () => {
+  if (!advisorForm.firstName.trim() || !advisorForm.lastName.trim() || !advisorForm.institution.trim()) return;
+  advisors.push({ ...advisorForm });
+  resetAdvisorForm();
+};
+const removeAdvisor = (idx) => { advisors.splice(idx, 1); };
 
 const trackOptions = [
   { value: 'เทคโนโลยีภูมิสารสนเทศและภูมิศาสตร์', label: 'เทคโนโลยีภูมิสารสนเทศและภูมิศาสตร์ (gi)', abbr: 'GI', code: '419' },
@@ -48,33 +203,6 @@ const isPastDeadline = computed(() => {
   if (!submissionCloseDate.value) return false;
   return new Date() > new Date(submissionCloseDate.value);
 });
-
-onMounted(async () => {
-  try {
-    const { data } = await supabase.from('system_settings').select('config_json').eq('id', 1).maybeSingle();
-    if (data?.config_json?.conference) {
-      const conf = data.config_json.conference;
-      if (conf.dates?.submissionClose) {
-        submissionCloseDate.value = conf.dates.submissionClose;
-      }
-      if (conf.activeTracks) {
-        activeTracks.value = conf.activeTracks;
-        if (activeTracks.value.length > 0 && !activeTracks.value.includes(formData.track)) {
-          formData.track = activeTracks.value[0];
-        }
-      }
-      // Use year from settings (last 2 digits of C.E.), fallback to current C.E. year
-      if (conf.year) {
-        conferenceYear.value = String(conf.year).slice(-2);
-      } else {
-        conferenceYear.value = String(new Date().getFullYear()).slice(-2);
-      }
-    }
-  } catch (err) {
-    conferenceYear.value = String(new Date().getFullYear()).slice(-2);
-  }
-});
-
 const filteredTrackOptions = computed(() => {
   if (!activeTracks.value || activeTracks.value.length === 0) return trackOptions;
   return trackOptions.filter(t => activeTracks.value.includes(t.value));
@@ -95,56 +223,85 @@ const formData = reactive({
   termsAccepted: false
 });
 
-const uploadFile = ref(null);
-const uploadError = ref('');
+const fullPaperFiles = ref([]);
+const suppFiles = ref([]);
+const fullPaperError = ref('');
+const suppError = ref('');
 
 const showToast = (message, tone = 'ok') => {
   toast.value = { message, tone };
   setTimeout(() => { toast.value = null; }, 3000);
 };
 
+// Initialize segmenters for accurate word counting (especially for Thai)
+const thSegmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('th', { granularity: 'word' }) : null;
+const enSegmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('en', { granularity: 'word' }) : null;
 
-
-const coAuthorQuery = ref('');
-const coAuthorResults = ref([]);
-const isSearchingCoAuthor = ref(false);
-
-const searchCoAuthor = async () => {
-  const q = coAuthorQuery.value.trim();
-  if (q.length < 2) {
-    coAuthorResults.value = [];
-    return;
+const wordCountTh = computed(() => {
+  const text = formData.abstract_th.trim();
+  if (!text) return 0;
+  if (thSegmenter) {
+    let count = 0;
+    for (const segment of thSegmenter.segment(text)) {
+      if (segment.isWordLike) count++;
+    }
+    return count;
   }
-  
-  isSearchingCoAuthor.value = true;
+  return text.split(/\s+/).length; // Fallback
+});
+
+const wordCountEn = computed(() => {
+  const text = formData.abstract_en.trim();
+  if (!text) return 0;
+  if (enSegmenter) {
+    let count = 0;
+    for (const segment of enSegmenter.segment(text)) {
+      if (segment.isWordLike) count++;
+    }
+    return count;
+  }
+  return text.split(/\s+/).length; // Fallback
+});
+
+onMounted(async () => {
+  // Auto-populate first author from user profile
+  if (userProfile.value) {
+    const p = userProfile.value;
+    formData.authors.push({
+      prefix: p.title || '',
+      firstName: p.first_name_th || '',
+      lastName: p.last_name_th || '',
+      email: p.email || '',
+      institution: p.institution || '',
+      role: AUTHOR_ROLES[0] // First Author by default
+    });
+  }
+
   try {
-    const { data } = await supabase
-      .from('users')
-      .select('user_id, first_name_th, last_name_th, institution')
-      .eq('role', 'author')
-      .or(`first_name_th.ilike.%${q}%,last_name_th.ilike.%${q}%`)
-      .limit(5);
-      
-    coAuthorResults.value = data || [];
+    const { data } = await supabase.from('system_settings').select('config_json').eq('id', 1).maybeSingle();
+    if (data?.config_json?.conference) {
+      const conf = data.config_json.conference;
+      if (conf.dates?.submissionClose) {
+        submissionCloseDate.value = conf.dates.submissionClose;
+      }
+      if (conf.activeTracks) {
+        activeTracks.value = conf.activeTracks;
+        if (activeTracks.value.length > 0 && !activeTracks.value.includes(formData.track)) {
+          formData.track = activeTracks.value[0];
+        }
+      }
+      if (conf.academicYear) {
+        conferenceYear.value = String(conf.academicYear).slice(-2);
+      } else if (conf.year) {
+        conferenceYear.value = String(conf.year).slice(-2);
+      } else {
+        conferenceYear.value = String(new Date().getFullYear()).slice(-2);
+      }
+    }
   } catch (err) {
-    console.error(err);
-  } finally {
-    isSearchingCoAuthor.value = false;
+    conferenceYear.value = String(new Date().getFullYear()).slice(-2);
   }
-};
-
-const addCoAuthorFromSearch = (u) => {
-  const name = [u.first_name_th, u.last_name_th].filter(Boolean).join(' ');
-  if (!formData.authors.includes(name)) {
-    formData.authors.push(name);
-  }
-  coAuthorQuery.value = '';
-  coAuthorResults.value = [];
-};
-
-const removeCoAuthor = (idx) => {
-  formData.authors.splice(idx, 1);
-};
+});
 
 const nextStep = () => {
   if (isPastDeadline.value) {
@@ -188,27 +345,72 @@ const formatDate = (v) => {
   return new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium' }).format(new Date(v));
 };
 
-const handlePickUploadFile = (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
+const handlePickFullPaper = (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
   
-  const maxBytes = 10 * 1024 * 1024; // 10 MB limit
-  const ext = String(file.name || '').split('.').pop()?.toLowerCase();
-  const allowed = new Set(['pdf']);
+  const maxBytes = 10 * 1024 * 1024;
+  const allowed = new Set(['pdf', 'doc', 'docx']);
 
-  if (!allowed.has(ext)) {
-    uploadError.value = 'รองรับเฉพาะไฟล์ .pdf เท่านั้น';
-    uploadFile.value = null;
-    return;
-  }
-  if (file.size > maxBytes) {
-    uploadError.value = 'ขนาดไฟล์ต้องไม่เกิน 10MB';
-    uploadFile.value = null;
-    return;
+  let currentSize = fullPaperFiles.value.reduce((acc, f) => acc + f.size, 0);
+
+  for (const file of files) {
+    const ext = String(file.name || '').split('.').pop()?.toLowerCase();
+    if (!allowed.has(ext)) {
+      fullPaperError.value = 'รองรับเฉพาะไฟล์ .pdf, .doc, .docx เท่านั้น';
+      return;
+    }
+    if (fullPaperFiles.value.length >= 2) {
+      fullPaperError.value = 'อัปโหลดไฟล์บทความฉบับเต็มได้สูงสุด 2 ไฟล์เท่านั้น';
+      return;
+    }
+    if (currentSize + file.size > maxBytes) {
+      fullPaperError.value = 'ขนาดไฟล์รวมทั้งหมดต้องไม่เกิน 10MB';
+      return;
+    }
+    currentSize += file.size;
+    fullPaperFiles.value.push(file);
   }
   
-  uploadError.value = '';
-  uploadFile.value = file;
+  fullPaperError.value = '';
+  e.target.value = '';
+};
+
+const removeFullPaper = (idx) => {
+  fullPaperFiles.value.splice(idx, 1);
+  fullPaperError.value = '';
+};
+
+const handlePickSupp = (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  
+  const maxBytes = 10 * 1024 * 1024;
+  const allowed = new Set(['png', 'jpg', 'jpeg', 'zip']);
+
+  let currentSize = suppFiles.value.reduce((acc, f) => acc + f.size, 0);
+
+  for (const file of files) {
+    const ext = String(file.name || '').split('.').pop()?.toLowerCase();
+    if (!allowed.has(ext)) {
+      suppError.value = 'รองรับเฉพาะไฟล์รูปภาพ หรือ .zip เท่านั้น';
+      return;
+    }
+    if (currentSize + file.size > maxBytes) {
+      suppError.value = 'ขนาดไฟล์รวมทั้งหมดต้องไม่เกิน 10MB';
+      return;
+    }
+    currentSize += file.size;
+    suppFiles.value.push(file);
+  }
+  
+  suppError.value = '';
+  e.target.value = '';
+};
+
+const removeSuppFile = (idx) => {
+  suppFiles.value.splice(idx, 1);
+  suppError.value = '';
 };
 
 const submitArticle = async () => {
@@ -216,9 +418,19 @@ const submitArticle = async () => {
     showToast('ปิดรับบทความแล้ว ไม่สามารถส่งได้', 'err');
     return;
   }
-  if (!uploadFile.value) {
-    showToast('กรุณาอัปโหลดไฟล์บทความ', 'err');
+  if (fullPaperFiles.value.length === 0) {
+    showToast('กรุณาอัปโหลดไฟล์บทความอย่างน้อย 1 ไฟล์', 'err');
     return;
+  }
+  if (formData.authors.length === 0) {
+    showToast('กรุณาเพิ่มข้อมูลผู้แต่งอย่างน้อย 1 ท่าน', 'err');
+    return;
+  }
+  for (const a of formData.authors) {
+    if (!a.firstName || !a.lastName || !a.institution) {
+      showToast('กรุณากรอกข้อมูลผู้แต่ง (ชื่อ, นามสกุล, สถาบัน) ให้ครบถ้วน', 'err');
+      return;
+    }
   }
   if (!formData.termsAccepted) {
     showToast('กรุณายอมรับข้อกำหนดและเงื่อนไข', 'err');
@@ -232,20 +444,28 @@ const submitArticle = async () => {
   isSubmitting.value = true;
   
   try {
-    const fileExt = uploadFile.value.name.split('.').pop();
-    const fileName = `submission_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `submissions/${userProfile.value.user_id}/${fileName}`;
-    
-    const { error: uploadErr } = await supabase.storage
-      .from('papers')
-      .upload(filePath, uploadFile.value);
+    const uploadedUrls = [];
+    const allFilesToUpload = [...fullPaperFiles.value, ...suppFiles.value];
+    for (const file of allFilesToUpload) {
+      const cleanName = file.name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_');
+      const fileName = `submission_${Date.now()}_${cleanName}`;
+      const filePath = `submissions/${userProfile.value.user_id}/${fileName}`;
       
-    if (uploadErr) throw uploadErr;
+      const { error: uploadErr } = await supabase.storage.from('papers').upload(filePath, file);
+      if (uploadErr) throw uploadErr;
+      
+      const { data: { publicUrl } } = supabase.storage.from('papers').getPublicUrl(filePath);
+      uploadedUrls.push(publicUrl);
+    }
     
-    const { data: { publicUrl } } = supabase.storage.from('papers').getPublicUrl(filePath);
-    
-    const authorName = [userProfile.value.first_name_th, userProfile.value.last_name_th].filter(Boolean).join(' ') || userProfile.value.email;
-    const finalAuthors = [authorName, ...formData.authors];
+    // Format authors as an array of strings for the papers table (Keep for backward compatibility)
+    const formattedAuthors = formData.authors.map(a => 
+      `[${a.role}] ${a.prefix}${a.firstName} ${a.lastName} - ${a.institution} ${a.email ? `(${a.email})` : ''} ${a.isPresenting ? '(ผู้นำเสนอ)' : ''}`.trim()
+    );
+    // Append advisors
+    advisors.forEach(adv => {
+      formattedAuthors.push(`[${adv.role}] ${adv.prefix}${adv.firstName} ${adv.lastName} - ${adv.institution}`);
+    });
 
     const trackInfo = trackOptions.find(t => t.value === formData.track) || trackOptions[7];
     const yearSuffix = conferenceYear.value || String(new Date().getFullYear()).slice(-2);
@@ -259,6 +479,42 @@ const submitArticle = async () => {
     const runningNumber = String((count || 0) + 1).padStart(3, '0');
     const paperId = `${prefix}${runningNumber}`;
 
+    // Prepare paper_authors data
+    const paperAuthorsRecords = [];
+    
+    // Push authors
+    formData.authors.forEach((a, idx) => {
+      paperAuthorsRecords.push({
+        paper_code: paperId,
+        member_type: 'author',
+        role: a.role,
+        prefix: a.prefix,
+        first_name: a.firstName,
+        last_name: a.lastName,
+        institution: a.institution,
+        email: a.email || null,
+        is_presenting: a.isPresenting || false,
+        display_order: idx + 1
+      });
+    });
+
+    // Push advisors
+    advisors.forEach((adv, idx) => {
+      paperAuthorsRecords.push({
+        paper_code: paperId,
+        member_type: 'advisor',
+        role: adv.role,
+        prefix: adv.prefix,
+        first_name: adv.firstName,
+        last_name: adv.lastName,
+        institution: adv.institution,
+        email: adv.email || null,
+        is_presenting: false,
+        display_order: idx + 1
+      });
+    });
+
+    // 1. Insert into papers
     const { error: insertErr } = await supabase
       .from('papers')
       .insert({
@@ -270,13 +526,34 @@ const submitArticle = async () => {
         abstract_en: formData.abstract_en,
         track: formData.track,
         keywords: formData.keywords,
-        authors: finalAuthors,
-        file_url: publicUrl,
+        authors: formattedAuthors,
+        file_url: uploadedUrls.join(','),
         status: 'pending_review',
         accepted_terms: formData.termsAccepted
       });
       
     if (insertErr) throw insertErr;
+
+    // 2. Insert into paper_authors
+    const { error: insertAuthorsErr } = await supabase
+      .from('paper_authors')
+      .insert(paperAuthorsRecords);
+
+    if (insertAuthorsErr) {
+      console.error('Error inserting paper_authors:', insertAuthorsErr);
+      throw new Error('ไม่สามารถบันทึกข้อมูลรายชื่อผู้แต่งได้ กรุณาติดต่อผู้ดูแลระบบ');
+    }
+
+    // 🔔 แจ้งเตือน: ส่งบทความสำเร็จ (เฟส 2)
+    const paperTitle = formData.title_th || formData.title_en || 'บทความของคุณ';
+    await createNotification({
+      type: 'paper_submitted',
+      phase: 'submission',
+      title: 'ส่งบทความสำเร็จ',
+      message: `บทความเรื่อง "${paperTitle}" ถูกส่งเข้าระบบเรียบร้อยแล้ว สถานะปัจจุบัน: รอการตรวจสอบเบื้องต้นจาก Admin`,
+      paper_title: paperTitle,
+      link: '/portal/articles',
+    });
 
     currentStep.value = 5;
     window.scrollTo(0, 0);
@@ -290,7 +567,7 @@ const submitArticle = async () => {
 
 <template>
   <div class="flex-1 flex flex-col h-full bg-slate-50 animate-in slide-in-from-right duration-500 font-sans">
-    <header class="h-24 bg-white/80 backdrop-blur-xl border-b border-white shadow-sm flex items-center justify-between px-6 sm:px-10 sticky top-0 z-40">
+    <header class="h-24 bg-white/80 backdrop-blur-xl border-b border-white shadow-sm flex items-center justify-between px-6 sm:px-10 sticky top-0 z-20">
       <div class="flex items-center gap-4">
         <button @click="router.push('/portal/articles')" class="w-12 h-12 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center hover:bg-white hover:shadow-md transition-all duration-300">
           <ArrowLeft :size="20" class="text-slate-600" />
@@ -369,20 +646,13 @@ const submitArticle = async () => {
               <div class="space-y-4">
                 <div>
                   <label class="text-sm font-bold text-slate-700 mb-2 block">ระดับผู้ส่งผลงาน</label>
-                  <div class="flex gap-4">
-                    <label class="flex items-center gap-2 cursor-pointer p-3 border border-slate-200 rounded-xl hover:bg-slate-50 w-full">
-                      <input type="radio" v-model="formData.level" value="ปริญญาตรี" class="accent-purple-600" />
-                      <span class="text-sm text-slate-600">ปริญญาตรี</span>
-                    </label>
-                    <label class="flex items-center gap-2 cursor-pointer p-3 border border-slate-200 rounded-xl hover:bg-slate-50 w-full">
-                      <input type="radio" v-model="formData.level" value="บุคคลทั่วไป / นักวิจัย" class="accent-purple-600" />
-                      <span class="text-sm text-slate-600">บุคคลทั่วไป / นักวิจัย</span>
-                    </label>
-                  </div>
+                  <select v-model="formData.level" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 transition-colors">
+                    <option value="ปริญญาตรี">ปริญญาตรี (Undergraduate)</option>
+                  </select>
                 </div>
                 <div>
                   <label class="text-sm font-bold text-slate-700 mb-2 block">ประเภทบทความ</label>
-                  <select v-model="formData.type" disabled class="w-full p-3 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-500 cursor-not-allowed transition-colors appearance-none">
+                  <select v-model="formData.type" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 transition-colors">
                     <option value="Poster Presentation">Poster Presentation</option>
                   </select>
                 </div>
@@ -391,12 +661,9 @@ const submitArticle = async () => {
               <div class="space-y-4">
                 <div>
                   <label class="text-sm font-bold text-slate-700 mb-2 block">รูปแบบการนำเสนอ</label>
-                  <div class="flex gap-4">
-                    <label class="flex items-center gap-2 cursor-not-allowed p-3 border border-slate-200 bg-slate-50 rounded-xl w-full">
-                      <input type="radio" v-model="formData.format" value="On-site" disabled class="accent-purple-600" />
-                      <span class="text-sm text-slate-500 font-bold">On-site (สถานที่จัดงาน)</span>
-                    </label>
-                  </div>
+                  <select v-model="formData.format" class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 transition-colors">
+                    <option value="On-site">On-site (สถานที่จัดงาน)</option>
+                  </select>
                   <p class="text-[11px] text-slate-400 mt-2">* ปีนี้จัดการนำเสนอในรูปแบบ On-site ทั้งหมด</p>
                 </div>
                 <div>
@@ -426,96 +693,289 @@ const submitArticle = async () => {
 
           <!-- Step 2 -->
           <div v-if="currentStep === 2" class="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+            <!-- Authors Header -->
             <div class="flex justify-between items-center">
               <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Users :size="20" class="text-purple-500"/> รายชื่อผู้แต่ง (Authors List)
+                <Users :size="20" class="text-purple-500"/> รายชื่อผู้แต่ง / ผู้นำเสนอ (Authors & Presenters)
               </h3>
+              <button @click="openAddAuthorForm" class="bg-purple-100 text-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-purple-200 flex items-center gap-1 transition-colors">
+                <UserPlus :size="14" /> เพิ่มผู้แต่ง / ผู้นำเสนอ
+              </button>
             </div>
 
-            <div class="overflow-hidden border border-slate-200 rounded-xl">
-              <table class="w-full text-left">
-                <thead class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase">
+            <!-- Authors Table -->
+            <div v-if="formData.authors.length > 0" class="overflow-x-auto rounded-xl border border-slate-200">
+              <table class="w-full text-sm">
+                <thead class="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th class="px-6 py-4 w-16 text-center">#</th>
-                    <th class="px-6 py-4">ชื่อ-สกุล</th>
-                    <th class="px-6 py-4">สถาบัน</th>
-                    <th class="px-6 py-4">สถานะ</th>
-                    <th class="px-6 py-4 text-right">Action</th>
+                    <th class="text-left px-4 py-3 text-xs font-black text-slate-500 w-10">#</th>
+                    <th class="text-left px-4 py-3 text-xs font-black text-slate-500">ชื่อ-นามสกุล</th>
+                    <th class="text-left px-4 py-3 text-xs font-black text-slate-500 hidden md:table-cell">สถาบัน</th>
+                    <th class="text-left px-4 py-3 text-xs font-black text-slate-500 hidden lg:table-cell">สถานะ</th>
+                    <th class="text-right px-4 py-3 text-xs font-black text-slate-500 w-28">จัดการ</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
-                  <tr>
-                    <td class="px-6 py-4 text-center text-sm font-medium text-slate-500">1</td>
-                    <td class="px-6 py-4">
-                      <div class="flex items-center gap-3">
-                        <div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 text-xs font-bold">
-                          {{ userProfile ? (userProfile.first_name_en?.[0] || 'U') : 'U' }}
-                        </div>
-                        <span class="text-sm font-bold text-slate-800">
-                          {{ userProfile ? ([userProfile.first_name_th, userProfile.last_name_th].filter(Boolean).join(' ') || userProfile.email) : 'คุณ' }}
-                        </span>
+                <tbody>
+                  <tr v-for="(author, idx) in formData.authors" :key="idx" class="border-b border-slate-100 last:border-0 hover:bg-purple-50/30 transition-colors">
+                    <td class="px-4 py-3 text-xs font-black text-purple-600">{{ idx + 1 }}</td>
+                    <td class="px-4 py-3">
+                      <div class="font-bold text-slate-800 flex items-center gap-2">
+                        {{ author.prefix }}{{ author.firstName }} {{ author.lastName }}
+                        <span v-if="author.isPresenting" class="px-1.5 py-0.5 bg-green-100 text-green-700 text-[10px] font-bold rounded">ผู้นำเสนอ</span>
                       </div>
+                      <div v-if="author.email" class="text-xs text-slate-400 mt-0.5">{{ author.email }}</div>
+                      <div class="text-xs text-slate-400 mt-0.5 md:hidden">{{ author.institution }}</div>
                     </td>
-                    <td class="px-6 py-4 text-sm text-slate-600">{{ userProfile?.institution || '-' }}</td>
-                    <td class="px-6 py-4">
-                      <span class="bg-purple-50 text-purple-600 px-2 py-1 rounded-md text-[10px] font-bold border border-purple-100">Corresponding</span>
+                    <td class="px-4 py-3 text-xs text-slate-600 hidden md:table-cell">{{ author.institution }}</td>
+                    <td class="px-4 py-3 hidden lg:table-cell">
+                      <span class="text-[10px] font-bold px-2 py-1 rounded-full" :class="author.role.includes('First') ? 'bg-purple-100 text-purple-700' : author.role.includes('Corresponding') ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600'">
+                        {{ author.role.split('(')[0].trim() }}
+                      </span>
                     </td>
-                    <td class="px-6 py-4 text-right"><span class="text-xs text-slate-400">(คุณ)</span></td>
-                  </tr>
-                  
-                  <tr v-for="(author, idx) in formData.authors" :key="idx">
-                    <td class="px-6 py-4 text-center text-sm font-medium text-slate-500">{{ idx + 2 }}</td>
-                    <td class="px-6 py-4">
-                      <span class="text-sm font-bold text-slate-800">{{ author }}</span>
-                    </td>
-                    <td class="px-6 py-4 text-sm text-slate-600">-</td>
-                    <td class="px-6 py-4">
-                      <span class="bg-slate-50 text-slate-500 px-2 py-1 rounded-md text-[10px] font-bold border border-slate-200">Co-author</span>
-                    </td>
-                    <td class="px-6 py-4 text-right">
-                      <button @click="removeCoAuthor(idx)" class="text-slate-400 hover:text-red-500 transition-colors">
-                        <X :size="16" />
-                      </button>
+                    <td class="px-4 py-3 text-right">
+                      <div class="flex items-center justify-end gap-1">
+                        <button @click="moveAuthor(idx, -1)" :disabled="idx === 0" class="p-1 rounded hover:bg-slate-100 text-slate-400 disabled:opacity-30" title="เลื่อนขึ้น">▲</button>
+                        <button @click="moveAuthor(idx, 1)" :disabled="idx === formData.authors.length - 1" class="p-1 rounded hover:bg-slate-100 text-slate-400 disabled:opacity-30" title="เลื่อนลง">▼</button>
+                        <button @click="openEditAuthorForm(idx)" class="p-1 rounded hover:bg-blue-100 text-blue-500" title="แก้ไข"><FileText :size="14" /></button>
+                        <button @click="removeAuthor(idx)" class="p-1 rounded hover:bg-red-100 text-red-400" title="ลบ"><Trash2 :size="14" /></button>
+                      </div>
                     </td>
                   </tr>
                 </tbody>
               </table>
-              <div class="p-6 bg-slate-50 border-t border-slate-200">
-                <div class="max-w-md mx-auto space-y-3">
-                  <div class="text-xs font-black text-slate-500 uppercase tracking-wider text-center mb-1">เพิ่มผู้ร่วมวิจัยจากฐานข้อมูล</div>
-                  <div class="relative">
-                    <Search :size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      v-model="coAuthorQuery" 
-                      @input="searchCoAuthor"
-                      placeholder="ค้นหาด้วยชื่อ หรือ นามสกุล..." 
-                      class="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 shadow-sm transition-all" 
-                    />
-                  </div>
+            </div>
+            <div v-else class="text-center py-10 bg-slate-50 border border-slate-200 rounded-xl">
+              <Users :size="32" class="text-slate-300 mx-auto mb-2" />
+              <p class="text-sm text-slate-500 font-bold">ยังไม่มีผู้แต่ง</p>
+              <p class="text-xs text-slate-400 mt-1">คลิกปุ่ม "เพิ่มผู้แต่ง" เพื่อระบุข้อมูลผู้แต่งทุกคน</p>
+            </div>
 
-                  <!-- Search Results Dropdown -->
-                  <div v-if="coAuthorResults.length > 0" class="bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                    <button 
-                      v-for="u in coAuthorResults" :key="u.user_id"
-                      @click="addCoAuthorFromSearch(u)"
-                      class="w-full px-4 py-3 text-left hover:bg-purple-50 flex items-center justify-between group transition-colors border-b border-slate-50 last:border-0"
-                    >
-                      <div>
-                        <div class="text-sm font-bold text-slate-800">{{ u.first_name_th }} {{ u.last_name_th }}</div>
-                        <div class="text-[10px] text-slate-500">{{ u.institution || 'ไม่ระบุสถาบัน' }}</div>
+            <!-- Author Add/Edit Form -->
+            <div v-if="showAuthorForm" class="bg-purple-50/50 border border-purple-200 rounded-2xl p-6 space-y-4">
+              <div class="text-sm font-black text-purple-700">{{ editingAuthorIdx >= 0 ? 'แก้ไขผู้แต่ง' : 'เพิ่มผู้แต่งใหม่' }}</div>
+              <div class="grid grid-cols-1 sm:grid-cols-6 gap-4">
+                <!-- Prefix Searchable Dropdown -->
+                <div class="sm:col-span-2 relative dropdown-container">
+                  <label class="text-xs font-bold text-slate-600 mb-1 block">คำนำหน้า *</label>
+                  <div 
+                    @click="prefixDropdownOpen = !prefixDropdownOpen"
+                    class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm flex items-center justify-between cursor-pointer hover:border-purple-400 transition-colors"
+                  >
+                    <span :class="authorForm.prefix ? 'text-slate-800' : 'text-slate-400'">{{ authorForm.prefix || 'เลือก...' }}</span>
+                    <ChevronDown :size="14" class="text-slate-400 transition-transform" :class="{ 'rotate-180': prefixDropdownOpen }" />
+                  </div>
+                  <div v-if="prefixDropdownOpen" class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    <div class="p-2 border-b border-purple-50 bg-slate-50">
+                      <div class="relative">
+                        <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input type="text" v-model="prefixSearch" placeholder="ค้นหาหรือพิมพ์เพิ่ม..." class="w-full h-8 pl-8 pr-2 text-xs border border-slate-200 rounded-md focus:outline-none focus:border-purple-400" @click.stop />
                       </div>
-                      <Plus :size="16" class="text-slate-300 group-hover:text-purple-600 transition-colors" />
-                    </button>
-                  </div>
-
-                  <!-- Not Found Warning -->
-                  <div v-else-if="coAuthorQuery.length >= 2 && !isSearchingCoAuthor" class="p-4 rounded-2xl bg-amber-50 border border-amber-100 flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <AlertCircle :size="18" class="text-amber-500 shrink-0 mt-0.5" />
-                    <div>
-                      <p class="text-xs font-bold text-amber-900 leading-relaxed">ไม่พบรายชื่อในระบบ</p>
-                      <p class="text-[10px] text-amber-700/80 mt-0.5 leading-relaxed">กรุณาแจ้งให้ผู้ร่วมวิจัยลงทะเบียนเข้าสู่ระบบก่อน เพื่อความถูกต้องของข้อมูลและประวัติการวิจัย</p>
+                    </div>
+                    <div class="max-h-40 overflow-y-auto custom-scrollbar">
+                      <button v-for="p in filteredPrefixes" :key="p" @click="selectPrefix(p)" class="block w-full text-left px-3 py-2 text-xs hover:bg-purple-50 flex items-center justify-between transition-colors">
+                        {{ p }}
+                        <Check v-if="authorForm.prefix === p" :size="12" class="text-purple-600" />
+                      </button>
+                      <div v-if="filteredPrefixes.length === 0 && prefixSearch" class="p-2 border-t border-slate-100">
+                        <button type="button" @click="selectPrefix(prefixSearch)" class="w-full text-center text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1.5 rounded-md hover:bg-purple-100">ใช้ "{{ prefixSearch }}"</button>
+                      </div>
                     </div>
                   </div>
+                  <p class="text-[10px] text-slate-400 mt-1">* คลิกเลือก หรือพิมพ์เพิ่มได้เลย</p>
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="text-xs font-bold text-slate-600 mb-1 block">ชื่อ (First Name) *</label>
+                  <input type="text" v-model="authorForm.firstName" placeholder="ชื่อ" class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" />
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="text-xs font-bold text-slate-600 mb-1 block">นามสกุล (Last Name) *</label>
+                  <input type="text" v-model="authorForm.lastName" placeholder="นามสกุล" class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" />
+                </div>
+                <!-- Institution Searchable Dropdown -->
+                <div class="sm:col-span-3 relative dropdown-container">
+                  <label class="text-xs font-bold text-slate-600 mb-1 block">สถาบัน (Institution) *</label>
+                  <div 
+                    @click="instDropdownOpen = !instDropdownOpen"
+                    class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm flex items-center justify-between cursor-pointer hover:border-purple-400 transition-colors"
+                  >
+                    <span class="truncate pr-2" :class="authorForm.institution ? 'text-slate-800' : 'text-slate-400'">{{ authorForm.institution || 'เลือกสถาบัน...' }}</span>
+                    <ChevronDown :size="14" class="text-slate-400 transition-transform shrink-0" :class="{ 'rotate-180': instDropdownOpen }" />
+                  </div>
+                  <div v-if="instDropdownOpen" class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                    <div class="p-2 border-b border-purple-50 bg-slate-50">
+                      <div class="relative">
+                        <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input type="text" v-model="instSearch" placeholder="พิมพ์ค้นหาสถาบัน..." class="w-full h-8 pl-8 pr-2 text-xs border border-slate-200 rounded-md focus:outline-none focus:border-purple-400" @click.stop />
+                      </div>
+                    </div>
+                    <div class="max-h-48 overflow-y-auto custom-scrollbar">
+                      <button v-for="u in filteredInstitutions" :key="u" @click="selectInstitution(u)" class="block w-full text-left px-3 py-2 text-xs hover:bg-purple-50 flex items-center justify-between transition-colors">
+                        <span class="truncate pr-2">{{ u }}</span>
+                        <Check v-if="authorForm.institution === u" :size="12" class="text-purple-600 shrink-0" />
+                      </button>
+                      <div v-if="filteredInstitutions.length === 0 && instSearch" class="p-2 border-t border-slate-100">
+                        <button type="button" @click="selectInstitution(instSearch)" class="w-full text-center text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1.5 rounded-md hover:bg-purple-100">ใช้ "{{ instSearch }}"</button>
+                      </div>
+                    </div>
+                  </div>
+                  <p class="text-[10px] text-slate-400 mt-1">* คลิกเลือก หรือพิมพ์เพิ่มได้เลย</p>
+                </div>
+                <div class="sm:col-span-3">
+                  <label class="text-xs font-bold text-slate-600 mb-1 block">อีเมล (Email)</label>
+                  <input type="email" v-model="authorForm.email" placeholder="email@example.com" class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400" />
+                </div>
+                <div class="sm:col-span-6">
+                  <label class="text-xs font-bold text-slate-600 mb-1 block">สถานะผู้แต่ง (Author Role)</label>
+                  <select v-model="authorForm.role" class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-purple-400">
+                    <option v-for="r in AUTHOR_ROLES" :key="r" :value="r">{{ r }}</option>
+                  </select>
+                </div>
+                <div class="sm:col-span-6">
+                  <label class="flex items-start gap-3 cursor-pointer group p-3 border border-slate-200 hover:bg-purple-50 hover:border-purple-200 rounded-xl transition-colors">
+                    <div class="mt-0.5">
+                      <input type="checkbox" v-model="authorForm.isPresenting" class="accent-purple-600 w-4 h-4" />
+                    </div>
+                    <div class="text-xs text-slate-600">
+                      <span class="font-bold text-slate-800 block mb-0.5">เป็นผู้นำเสนอ (Presenting Author)</span>
+                      ติ๊กเลือกหากผู้แต่งท่านนี้จะเป็นผู้ขึ้นนำเสนอผลงานในวันจัดงาน
+                    </div>
+                  </label>
+                </div>
+              </div>
+              <div class="flex gap-2 justify-end pt-2">
+                <button @click="resetAuthorForm" class="px-4 py-2 rounded-lg text-xs font-bold text-slate-500 hover:bg-white border border-slate-200 transition-colors">ยกเลิก</button>
+                <button @click="saveAuthor" class="px-4 py-2 rounded-lg text-xs font-bold bg-purple-600 text-white hover:bg-purple-700 transition-colors flex items-center gap-1">
+                  <Check :size="14" /> {{ editingAuthorIdx >= 0 ? 'บันทึกการแก้ไข' : 'เพิ่มผู้แต่ง' }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Advisor Section -->
+            <div class="border-t border-slate-100 pt-6 space-y-4">
+              <div class="flex justify-between items-center">
+                <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <GraduationCap :size="20" class="text-indigo-500"/> อาจารย์ที่ปรึกษา / ที่ปรึกษา (Advisors)
+                </h3>
+                <button @click="showAdvisorForm = true" v-if="!showAdvisorForm" class="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-200 flex items-center gap-1 transition-colors">
+                  <Plus :size="14" /> เพิ่มที่ปรึกษา
+                </button>
+              </div>
+              <!-- Advisor list -->
+              <div v-if="advisors.length > 0" class="space-y-2">
+                <div v-for="(adv, idx) in advisors" :key="idx" class="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-4 py-3">
+                  <div>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 mr-2">{{ adv.role }}</span>
+                    <span class="text-sm font-bold text-slate-800">{{ adv.prefix }}{{ adv.firstName }} {{ adv.lastName }}</span>
+                    <span v-if="adv.institution" class="text-xs text-slate-400 ml-2">{{ adv.institution }}</span>
+                  </div>
+                  <button @click="removeAdvisor(idx)" class="text-red-400 hover:text-red-600 p-1"><Trash2 :size="14" /></button>
+                </div>
+              </div>
+              <!-- Advisor Form -->
+              <div v-if="showAdvisorForm" class="bg-indigo-50/50 border border-indigo-200 rounded-2xl p-5 space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-6 gap-4">
+                  <div class="sm:col-span-2 relative dropdown-container">
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">คำนำหน้า *</label>
+                    <div 
+                      @click="advPrefixDropdownOpen = !advPrefixDropdownOpen"
+                      class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm flex items-center justify-between cursor-pointer hover:border-indigo-400 transition-colors"
+                    >
+                      <span :class="advisorForm.prefix ? 'text-slate-800' : 'text-slate-400'">{{ advisorForm.prefix || 'เลือก...' }}</span>
+                      <ChevronDown :size="14" class="text-slate-400 transition-transform" :class="{ 'rotate-180': advPrefixDropdownOpen }" />
+                    </div>
+                    <div v-if="advPrefixDropdownOpen" class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div class="p-2 border-b border-indigo-50 bg-slate-50">
+                        <div class="relative">
+                          <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input type="text" v-model="advPrefixSearch" placeholder="ค้นหาหรือพิมพ์เพิ่ม..." class="w-full h-8 pl-8 pr-2 text-xs border border-slate-200 rounded-md focus:outline-none focus:border-indigo-400" @click.stop />
+                        </div>
+                      </div>
+                      <div class="max-h-40 overflow-y-auto custom-scrollbar">
+                        <button v-for="p in filteredAdvPrefixes" :key="p" @click="selectAdvPrefix(p)" class="block w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 flex items-center justify-between transition-colors">
+                          {{ p }}
+                          <Check v-if="advisorForm.prefix === p" :size="12" class="text-indigo-600" />
+                        </button>
+                        <div v-if="filteredAdvPrefixes.length === 0 && advPrefixSearch" class="p-2 border-t border-slate-100">
+                          <button type="button" @click="selectAdvPrefix(advPrefixSearch)" class="w-full text-center text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1.5 rounded-md hover:bg-indigo-100">ใช้ "{{ advPrefixSearch }}"</button>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-1">* คลิกเลือก หรือพิมพ์เพิ่มได้เลย</p>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">ชื่อ *</label>
+                    <input type="text" v-model="advisorForm.firstName" placeholder="ชื่อ" class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400" />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">นามสกุล *</label>
+                    <input type="text" v-model="advisorForm.lastName" placeholder="นามสกุล" class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400" />
+                  </div>
+                  <div class="sm:col-span-3 relative dropdown-container">
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">สถาบัน *</label>
+                    <div 
+                      @click="advInstDropdownOpen = !advInstDropdownOpen"
+                      class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm flex items-center justify-between cursor-pointer hover:border-indigo-400 transition-colors"
+                    >
+                      <span class="truncate pr-2" :class="advisorForm.institution ? 'text-slate-800' : 'text-slate-400'">{{ advisorForm.institution || 'เลือกสถาบัน...' }}</span>
+                      <ChevronDown :size="14" class="text-slate-400 transition-transform shrink-0" :class="{ 'rotate-180': advInstDropdownOpen }" />
+                    </div>
+                    <div v-if="advInstDropdownOpen" class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div class="p-2 border-b border-indigo-50 bg-slate-50">
+                        <div class="relative">
+                          <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input type="text" v-model="advInstSearch" placeholder="พิมพ์ค้นหาสถาบัน..." class="w-full h-8 pl-8 pr-2 text-xs border border-slate-200 rounded-md focus:outline-none focus:border-indigo-400" @click.stop />
+                        </div>
+                      </div>
+                      <div class="max-h-48 overflow-y-auto custom-scrollbar">
+                        <button v-for="u in filteredAdvInstitutions" :key="u" @click="selectAdvInstitution(u)" class="block w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 flex items-center justify-between transition-colors">
+                          <span class="truncate pr-2">{{ u }}</span>
+                          <Check v-if="advisorForm.institution === u" :size="12" class="text-indigo-600 shrink-0" />
+                        </button>
+                        <div v-if="filteredAdvInstitutions.length === 0 && advInstSearch" class="p-2 border-t border-slate-100">
+                          <button type="button" @click="selectAdvInstitution(advInstSearch)" class="w-full text-center text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1.5 rounded-md hover:bg-indigo-100">ใช้ "{{ advInstSearch }}"</button>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-1">* คลิกเลือก หรือพิมพ์เพิ่มได้เลย</p>
+                  </div>
+                  <div class="sm:col-span-3">
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">อีเมล (Email)</label>
+                    <input type="email" v-model="advisorForm.email" placeholder="email@example.com" class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-indigo-400" />
+                  </div>
+                  <div class="sm:col-span-6 relative dropdown-container">
+                    <label class="text-xs font-bold text-slate-600 mb-1 block">ตำแหน่ง</label>
+                    <div 
+                      @click="advRoleDropdownOpen = !advRoleDropdownOpen"
+                      class="w-full p-2 bg-white border border-slate-200 rounded-lg text-sm flex items-center justify-between cursor-pointer hover:border-indigo-400 transition-colors"
+                    >
+                      <span class="truncate pr-2" :class="advisorForm.role ? 'text-slate-800' : 'text-slate-400'">{{ advisorForm.role || 'เลือกตำแหน่ง...' }}</span>
+                      <ChevronDown :size="14" class="text-slate-400 transition-transform shrink-0" :class="{ 'rotate-180': advRoleDropdownOpen }" />
+                    </div>
+                    <div v-if="advRoleDropdownOpen" class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2">
+                      <div class="p-2 border-b border-indigo-50 bg-slate-50">
+                        <div class="relative">
+                          <Search :size="12" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input type="text" v-model="advRoleSearch" placeholder="พิมพ์ตำแหน่ง..." class="w-full h-8 pl-8 pr-2 text-xs border border-slate-200 rounded-md focus:outline-none focus:border-indigo-400" @click.stop />
+                        </div>
+                      </div>
+                      <div class="max-h-48 overflow-y-auto custom-scrollbar">
+                        <button v-for="r in filteredAdvRoles" :key="r" @click="selectAdvRole(r)" class="block w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 flex items-center justify-between transition-colors">
+                          <span class="truncate pr-2">{{ r }}</span>
+                          <Check v-if="advisorForm.role === r" :size="12" class="text-indigo-600 shrink-0" />
+                        </button>
+                        <div v-if="filteredAdvRoles.length === 0 && advRoleSearch" class="p-2 border-t border-slate-100">
+                          <button type="button" @click="selectAdvRole(advRoleSearch)" class="w-full text-center text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1.5 rounded-md hover:bg-indigo-100">ใช้ "{{ advRoleSearch }}"</button>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="text-[10px] text-slate-400 mt-1">* คลิกเลือก หรือพิมพ์เพิ่มได้เลย</p>
+                  </div>
+                </div>
+                <div class="flex gap-2 justify-end">
+                  <button @click="resetAdvisorForm" class="px-4 py-2 rounded-lg text-xs font-bold text-slate-500 hover:bg-white border border-slate-200">ยกเลิก</button>
+                  <button @click="saveAdvisor" class="px-4 py-2 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1">
+                    <Check :size="14" /> เพิ่มที่ปรึกษา
+                  </button>
                 </div>
               </div>
             </div>
@@ -528,13 +988,19 @@ const submitArticle = async () => {
              </h3>
              
              <div class="space-y-4">
-                <div>
-                  <label class="text-sm font-bold text-slate-700 mb-2 block">บทคัดย่อภาษาไทย</label>
+                 <div>
+                  <label class="text-sm font-bold text-slate-700 mb-2 flex justify-between items-end">
+                    <span>บทคัดย่อภาษาไทย</span>
+                    <span class="text-xs text-slate-400 font-normal"><span :class="{'text-amber-500': wordCountTh > 400}">{{ wordCountTh }}</span> คำ</span>
+                  </label>
                   <textarea v-model="formData.abstract_th" rows="5" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 transition-colors resize-none custom-scrollbar" 
                             placeholder="พิมพ์เนื้อหาบทคัดย่อภาษาไทย..."></textarea>
                 </div>
                 <div>
-                  <label class="text-sm font-bold text-slate-700 mb-2 block">บทคัดย่อภาษาอังกฤษ (English Abstract)</label>
+                  <label class="text-sm font-bold text-slate-700 mb-2 flex justify-between items-end">
+                    <span>บทคัดย่อภาษาอังกฤษ (English Abstract)</span>
+                    <span class="text-xs text-slate-400 font-normal"><span :class="{'text-amber-500': wordCountEn > 400}">{{ wordCountEn }}</span> คำ</span>
+                  </label>
                   <textarea v-model="formData.abstract_en" rows="5" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-purple-400 transition-colors resize-none custom-scrollbar" 
                             placeholder="Type your English abstract here..."></textarea>
                 </div>
@@ -547,7 +1013,7 @@ const submitArticle = async () => {
                     <input type="text" v-model="formData.keywordInput" @keydown="addKeyword" placeholder="พิมพ์แล้วกด Enter..." 
                            class="bg-transparent text-sm focus:outline-none flex-1 min-w-[150px] p-1" />
                   </div>
-                  <p class="text-[10px] text-slate-400 mt-1">*คั่นด้วยเครื่องหมายลูกน้ำ (,) หรือกด Enter</p>
+                  <p class="text-[10px] text-slate-400 mt-1">*คั่นด้วยเครื่องหมายจุลภาค (,) หรือกด Enter</p>
                 </div>
              </div>
           </div>
@@ -560,25 +1026,66 @@ const submitArticle = async () => {
              
              <div class="grid grid-cols-1 gap-6">
                <div>
-                 <label class="text-sm font-bold text-slate-700 mb-2 block">1. ไฟล์บทความฉบับเต็ม (Full Paper)</label>
-                 
-                 <label class="border-2 border-dashed border-slate-300 rounded-2xl p-10 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-purple-400 transition-all cursor-pointer group h-48 bg-slate-50/50">
-                   <input type="file" class="hidden" accept=".pdf" @change="handlePickUploadFile" />
-                   
-                   <div v-if="uploadFile" class="flex flex-col items-center">
-                     <FileUp :size="32" class="text-purple-600 mb-2" />
-                     <p class="text-sm font-bold text-slate-800">{{ uploadFile.name }}</p>
-                     <p class="text-xs text-slate-500 mt-1">{{ (uploadFile.size / (1024 * 1024)).toFixed(2) }} MB</p>
-                   </div>
-                   <div v-else class="flex flex-col items-center">
-                     <div class="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                       <FileUp :size="24" class="text-purple-500" />
-                     </div>
-                     <p class="text-sm font-bold text-slate-600">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</p>
-                     <p class="text-xs text-slate-400 mt-1">(.pdf ไม่เกิน 10MB)</p>
-                   </div>
+                 <label class="text-sm font-bold text-slate-700 mb-2 flex items-center justify-between">
+                   <span>1. ไฟล์บทความฉบับเต็ม (Full Paper) *</span>
+                   <span class="text-xs font-normal text-slate-400">อัปโหลดได้สูงสุด 2 ไฟล์</span>
                  </label>
-                 <p v-if="uploadError" class="text-xs font-bold text-red-500 mt-2">{{ uploadError }}</p>
+                 
+                 <!-- List of selected full paper files -->
+                 <div v-if="fullPaperFiles.length > 0" class="mb-3 space-y-2">
+                   <div v-for="(f, idx) in fullPaperFiles" :key="idx" class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                     <div class="flex items-center gap-3 overflow-hidden">
+                       <FileUp :size="20" class="text-purple-500 shrink-0" />
+                       <div class="truncate">
+                         <p class="text-xs font-bold text-slate-700 truncate">{{ f.name }}</p>
+                         <p class="text-[10px] text-slate-400">{{ (f.size / (1024 * 1024)).toFixed(2) }} MB</p>
+                       </div>
+                     </div>
+                     <button @click="removeFullPaper(idx)" class="text-red-400 hover:text-red-600 p-1 shrink-0"><Trash2 :size="14" /></button>
+                   </div>
+                 </div>
+
+                 <label v-if="fullPaperFiles.length < 2" class="border-2 border-dashed border-slate-300 rounded-2xl p-6 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-purple-400 transition-all cursor-pointer group bg-slate-50/50">
+                   <input type="file" class="hidden" accept=".pdf,.doc,.docx" multiple @change="handlePickFullPaper" />
+                   
+                   <div class="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                     <Plus :size="20" class="text-purple-500" />
+                   </div>
+                   <p class="text-sm font-bold text-slate-600">คลิกเพื่อเลือกไฟล์บทความ</p>
+                   <p class="text-xs text-slate-400 mt-1">(.pdf, .doc, .docx รวมไม่เกิน 10MB)</p>
+                 </label>
+                 <p v-if="fullPaperError" class="text-xs font-bold text-red-500 mt-2">{{ fullPaperError }}</p>
+               </div>
+
+               <div>
+                 <label class="text-sm font-bold text-slate-700 mb-2 flex items-center justify-between">
+                   <span>2. ไฟล์เพิ่มเติม (Supplementary Files)</span>
+                   <span class="text-xs font-normal text-slate-400">เลือกได้หลายไฟล์</span>
+                 </label>
+
+                 <div v-if="suppFiles.length > 0" class="mb-3 space-y-2">
+                   <div v-for="(f, idx) in suppFiles" :key="idx" class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                     <div class="flex items-center gap-3 overflow-hidden">
+                       <FileImage :size="20" class="text-blue-500 shrink-0" />
+                       <div class="truncate">
+                         <p class="text-xs font-bold text-slate-700 truncate">{{ f.name }}</p>
+                         <p class="text-[10px] text-slate-400">{{ (f.size / (1024 * 1024)).toFixed(2) }} MB</p>
+                       </div>
+                     </div>
+                     <button @click="removeSuppFile(idx)" class="text-red-400 hover:text-red-600 p-1 shrink-0"><Trash2 :size="14" /></button>
+                   </div>
+                 </div>
+                 
+                 <label class="border-2 border-dashed border-slate-300 rounded-2xl p-6 flex flex-col items-center justify-center text-slate-400 hover:bg-slate-50 hover:border-blue-400 transition-all cursor-pointer group bg-slate-50/50">
+                   <input type="file" class="hidden" accept=".png,.jpg,.jpeg,.zip" multiple @change="handlePickSupp" />
+                   
+                   <div class="w-10 h-10 bg-white rounded-full shadow-sm flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                     <Plus :size="20" class="text-blue-500" />
+                   </div>
+                   <p class="text-sm font-bold text-slate-600">คลิกเพื่อเลือกไฟล์รูปภาพ หรือไฟล์ zip</p>
+                   <p class="text-xs text-slate-400 mt-1">(.png, .jpg, .zip รวมไม่เกิน 10MB)</p>
+                 </label>
+                 <p v-if="suppError" class="text-xs font-bold text-red-500 mt-2">{{ suppError }}</p>
                </div>
              </div>
 
@@ -619,6 +1126,7 @@ const submitArticle = async () => {
         </div>
       </div>
     </div>
+  </div>
     
     <!-- Toast -->
     <div
@@ -630,5 +1138,4 @@ const submitArticle = async () => {
     >
       {{ toast.message }}
     </div>
-  </div>
 </template>

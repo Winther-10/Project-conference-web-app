@@ -1,30 +1,17 @@
-import { createClient } from '@supabase/supabase-js'
-import dotenv from 'dotenv'
-dotenv.config()
+const { createClient } = require('@supabase/supabase-client');
 
-const supabaseUrl = process.env.SUPABASE_URL || ''
-const supabaseKey = process.env.SUPABASE_KEY || ''
-const supabase = createClient(supabaseUrl, supabaseKey)
+const supabaseUrl = 'https://eczfppxlflhqbvcxheeh.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjemZwcHhsZmxocWJ2Y3hoZWVoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ0MjMzMjgsImV4cCI6MjA4OTk5OTMyOH0.ZmQXaoBxVkzfH94EECreNVmfD-P2SgCbfz0OgYX1aoY';
 
-async function checkTables() {
-  const { data, error } = await supabase
-    .from('papers')
-    .select('count')
-    .limit(1)
-  
-  console.log('Papers table exists:', !error)
-  
-  const { error: roomError } = await supabase
-    .from('presentation_rooms')
-    .select('count')
-    .limit(1)
-  console.log('presentation_rooms table exists:', !roomError)
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-  const { error: scheduleError } = await supabase
-    .from('presentation_schedule')
-    .select('count')
-    .limit(1)
-  console.log('presentation_schedule table exists:', !scheduleError)
+async function check() {
+  const { data, error } = await supabase.from('awards').select('*').limit(1);
+  if (error) {
+    console.error('Error fetching awards:', error);
+  } else {
+    console.log('Sample award record:', data);
+  }
 }
 
-checkTables()
+check();

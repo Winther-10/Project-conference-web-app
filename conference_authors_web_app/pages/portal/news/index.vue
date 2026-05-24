@@ -120,7 +120,7 @@ const highlightItems = computed(() => {
       <NuxtLink
         v-for="item in newsList"
         :key="item.id"
-        :to="`/news/${item.id}`"
+        :to="`/portal/news/${item.id}`"
         class="group flex flex-col sm:flex-row gap-5 p-5 rounded-[24px] border border-slate-200 bg-white hover:border-indigo-300 hover:shadow-lg hover:-translate-y-1 transition-all duration-300 cursor-pointer"
       >
         <div class="w-full sm:w-28 h-40 sm:h-28 rounded-[18px] flex-shrink-0 bg-cover bg-center shadow-inner overflow-hidden" 

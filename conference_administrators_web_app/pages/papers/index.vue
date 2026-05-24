@@ -159,9 +159,44 @@ const updatePaperStatus = async (paperId, newStatus) => {
     
     // อัปเดตข้อมูลใน UI ทันที
     const idx = papers.value.findIndex(p => p.paper_id === paperId);
+    let paperTitle = 'บทความของคุณ';
+    let authorId = null;
+
     if (idx !== -1) {
       papers.value[idx].status = newStatus;
+      paperTitle = papers.value[idx].title_th || paperTitle;
+      authorId = papers.value[idx].author_id; // ดึง author_id ของคนส่ง
     }
+
+    // --- ส่งอีเมลแจ้งเตือน ---
+    if (authorId) {
+      const { data: userData } = await supabase.from('users').select('email').eq('id', authorId).single();
+      if (userData && userData.email) {
+        let subject = '';
+        let html = '';
+        
+        if (newStatus === 'accepted') {
+          subject = 'แจ้งผลการพิจารณาบทความ (Accepted) - BRICC Festival';
+          html = `<h3>ยินดีด้วย!</h3><p>บทความเรื่อง <b>"${paperTitle}"</b> ของท่าน ผ่านการพิจารณาให้เข้าร่วมนำเสนอในงานประชุมวิชาการเรียบร้อยแล้ว</p>`;
+        } else if (newStatus === 'revision' || newStatus === 'revision_required') {
+          subject = 'แจ้งแก้ไขบทความ (Revision Required) - BRICC Festival';
+          html = `<h3>แจ้งแก้ไขบทความ</h3><p>บทความเรื่อง <b>"${paperTitle}"</b> ของท่าน มีข้อเสนอแนะจากผู้ทรงคุณวุฒิ กรุณาเข้าระบบเพื่อตรวจสอบและแก้ไข</p>`;
+        } else if (newStatus === 'rejected') {
+          subject = 'แจ้งผลการพิจารณาบทความ (Rejected) - BRICC Festival';
+          html = `<h3>แจ้งผลการพิจารณา</h3><p>บทความเรื่อง <b>"${paperTitle}"</b> ของท่าน ไม่ผ่านการพิจารณา ขอขอบคุณที่ให้ความสนใจส่งผลงานเข้าร่วมงาน</p>`;
+        }
+
+        if (subject) {
+          // ไม่ต้องใส่ await เพื่อให้ UI ไม่ต้องรอนาน ปล่อยให้ส่งอีเมลเป็น Background
+          $fetch('/api/send-email', {
+            method: 'POST',
+            body: { to: userData.email, subject, html }
+          }).catch(e => console.error('Email sending failed', e));
+        }
+      }
+    }
+    // ----------------------
+
     showToast('อัปเดตสถานะบทความสำเร็จ', 'ok');
     closeRowMenu();
   } catch (err) {
@@ -316,7 +351,7 @@ const stats = computed(() => [
                     <button @click="updatePaperStatus(p.paper_id, 'accepted')" class="w-full px-4 py-2.5 text-xs font-bold text-emerald-700 hover:bg-emerald-50 rounded-xl text-left flex items-center gap-2 transition-colors">
                       <CheckCircle2 class="w-4 h-4" /> ยอมรับ (Accept)
                     </button>
-                    <button @click="updatePaperStatus(p.paper_id, 'revision')" class="w-full px-4 py-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 rounded-xl text-left flex items-center gap-2 transition-colors">
+                    <button @click="updatePaperStatus(p.paper_id, 'revision_required')" class="w-full px-4 py-2.5 text-xs font-bold text-indigo-700 hover:bg-indigo-50 rounded-xl text-left flex items-center gap-2 transition-colors">
                       <Zap class="w-4 h-4" /> ให้แก้ไข (Revision)
                     </button>
                     <button @click="updatePaperStatus(p.paper_id, 'rejected')" class="w-full px-4 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-50 rounded-xl text-left flex items-center gap-2 transition-colors">

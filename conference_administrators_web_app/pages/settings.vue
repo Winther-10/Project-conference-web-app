@@ -15,6 +15,10 @@ import {
   Loader2
 } from 'lucide-vue-next';
 
+const currentYear = new Date().getFullYear();
+const availableYears = Array.from({ length: 10 }, (_, i) => String(currentYear - 2 + i));
+
+
 
 
 const allTracks = [
@@ -181,6 +185,7 @@ const DEFAULT_SETTINGS = {
   conference: {
     name: 'IC-Sci 2025: Innovations for Sustainable Science',
     year: '2025',
+    academicYear: '2024',
     venue: 'คณะวิทยาศาสตร์ มหาวิทยาลัยราชภัฏบุรีรัมย์',
     activeTracks: [],
     dates: {
@@ -189,7 +194,8 @@ const DEFAULT_SETTINGS = {
       announcementDate: '',
       revisionDeadline: '',
       conferenceDate: ''
-    }
+    },
+    finalistCount: 20
   },
   reviewer: { defaultDeadlineDays: 14, maxWorkloadPerReviewer: 5 },
   myAccount: { profilePictureDataUrl: '', prefix: '', firstName: '', lastName: '', email: '', phone: '' },
@@ -443,8 +449,16 @@ const conferenceNotice = computed(() => {
                     <input v-model="draft.conference.name" type="text" class="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none" />
                   </div>
                   <div>
-                    <div class="text-xs font-black text-slate-700 mb-2">ปีงานประชุม ค.ศ. (Conference Year)</div>
-                    <input v-model="draft.conference.year" type="text" maxlength="4" placeholder="2025" class="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none" />
+                    <div class="text-xs font-black text-slate-700 mb-2">ปีงานประชุม ค.ศ. (Event Year)</div>
+                    <select v-model="draft.conference.year" class="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none appearance-none cursor-pointer">
+                      <option v-for="y in availableYears" :key="y" :value="y">{{ y }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div class="text-xs font-black text-slate-700 mb-2">ปีการศึกษา ค.ศ. (Academic Year)</div>
+                    <select v-model="draft.conference.academicYear" class="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none appearance-none cursor-pointer">
+                      <option v-for="y in availableYears" :key="y" :value="y">{{ y }}</option>
+                    </select>
                   </div>
                   <div class="md:col-span-2">
                     <div class="text-xs font-black text-slate-700 mb-2">สถานที่จัดงาน (Venue)</div>
@@ -560,6 +574,20 @@ const conferenceNotice = computed(() => {
                   <div>
                     <div class="text-xs font-black text-slate-700 mb-2">วันจัดงานประชุม</div>
                     <input v-model="draft.conference.dates.conferenceDate" type="date" class="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="p-6 rounded-2xl border border-slate-200 bg-white">
+                <div class="text-sm font-black text-slate-800 mb-4">🏆 การตั้งค่ารางวัล (Awards Settings)</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <div class="text-xs font-black text-slate-700 mb-2">จำนวนทีมผ่านเข้ารอบ (Finalist Count)</div>
+                    <div class="flex items-center gap-3">
+                      <input v-model.number="draft.conference.finalistCount" type="number" min="1" class="w-full px-4 py-3 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none" />
+                      <span class="text-sm font-bold text-slate-500 whitespace-nowrap">ทีม</span>
+                    </div>
+                    <p class="text-[11px] text-slate-400 mt-2">จำนวนทีมที่ผ่านเข้ารอบสำหรับการออกเกียรติบัตร "ผ่านเข้ารอบ" (ทีมที่ไม่ผ่านจะได้เกียรติบัตร "เข้าร่วม")</p>
                   </div>
                 </div>
               </div>

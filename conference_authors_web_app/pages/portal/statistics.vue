@@ -1,7 +1,7 @@
 <script setup>
 definePageMeta({ layout: 'portal' });
 import { ref, computed, onMounted } from 'vue';
-import { ChevronDown, Download, Info, CheckCircle2, XCircle, TrendingUp, Users, FileText, Mic, BarChart2 } from 'lucide-vue-next';
+import { ChevronDown, Download, Info, CheckCircle2, XCircle, TrendingUp, Users, FileText, Mic, BarChart2, Building2 } from 'lucide-vue-next';
 import { useSupabase } from '~/composables/useSupabase';
 
 const supabase = useSupabase();
@@ -37,35 +37,55 @@ const fetchStatistics = async () => {
       });
     }
 
-    // Try to aggregate current year from actual tables if not in conference_statistics
-    if (!statsMap[currentYear]) {
-      // Aggregate data from current year
-      const { count: papersCount } = await supabase.from('papers').select('*', { count: 'exact', head: true });
-      const { count: acceptedCount } = await supabase.from('papers').select('*', { count: 'exact', head: true }).in('status', ['accepted', 'published']);
-      const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true });
+    // Always aggregate current year from actual tables to ensure real-time accuracy
+    const startOfYear = new Date(`${currentYear}-01-01T00:00:00.000Z`).toISOString();
+    const endOfYear = new Date(`${currentYear}-12-31T23:59:59.999Z`).toISOString();
 
-      const acceptanceRate = papersCount > 0 ? Math.round((acceptedCount / papersCount) * 100) : 0;
+    // PUBLISHED PAPERS: count only 'published'
+    const { count: publishedCount } = await supabase.from('papers').select('*', { count: 'exact', head: true })
+      .eq('status', 'published')
+      .gte('created_at', startOfYear).lte('created_at', endOfYear);
       
-      const { data: papersData } = await supabase.from('papers').select('track');
-      let trackCounts = {};
-      if (papersData) {
-        papersData.forEach(p => {
-          const t = p.track || 'General';
-          trackCounts[t] = (trackCounts[t] || 0) + 1;
-        });
-      }
-      const trackArr = Object.keys(trackCounts).map((k, i) => ({ id: `t${i}`, label: k, value: trackCounts[k] })).sort((a,b) => b.value - a.value);
+    // Total submitted for acceptance rate
+    const { count: totalSubmittedCount } = await supabase.from('papers').select('*', { count: 'exact', head: true })
+      .gte('created_at', startOfYear).lte('created_at', endOfYear);
+      
+    const { count: acceptedCount } = await supabase.from('papers').select('*', { count: 'exact', head: true })
+      .in('status', ['accepted', 'published'])
+      .gte('created_at', startOfYear).lte('created_at', endOfYear);
+      
+    // PARTICIPANTS: count only 'author' role
+    const { count: authorsCount } = await supabase.from('users').select('*', { count: 'exact', head: true })
+      .eq('role', 'author')
+      .gte('created_at', startOfYear).lte('created_at', endOfYear);
 
-      statsMap[currentYear] = {
-        yearLabel: `${currentYear} (ปีปัจจุบัน)`,
-        participants: { value: usersCount || 0, delta: 0 },
-        papers: { value: papersCount || 0, note: 'รอสรุปรายสถาบัน' },
-        speakers: { value: 0 }, // Would need speakers table
-        acceptance: { accepted: acceptanceRate, rejected: 100 - acceptanceRate },
-        tracks: trackArr.length > 0 ? trackArr : [{ id: 'cs', label: 'CS & AI', value: papersCount || 0 }],
-        satisfaction: 0
-      };
+    // Get unique institutions
+    const { data: usersData } = await supabase.from('users').select('institution')
+      .gte('created_at', startOfYear).lte('created_at', endOfYear);
+    const uniqueInstitutions = new Set(usersData?.map(u => u.institution).filter(Boolean)).size;
+
+    const acceptanceRate = totalSubmittedCount > 0 ? Math.round((acceptedCount / totalSubmittedCount) * 100) : 0;
+    
+    const { data: papersData } = await supabase.from('papers').select('track')
+      .gte('created_at', startOfYear).lte('created_at', endOfYear);
+    let trackCounts = {};
+    if (papersData) {
+      papersData.forEach(p => {
+        const t = p.track || 'General';
+        trackCounts[t] = (trackCounts[t] || 0) + 1;
+      });
     }
+    const trackArr = Object.keys(trackCounts).map((k, i) => ({ id: `t${i}`, label: k, value: trackCounts[k] })).sort((a,b) => b.value - a.value);
+
+    statsMap[currentYear] = {
+      yearLabel: `${currentYear} (ปีปัจจุบัน)`,
+      participants: { value: authorsCount || 0, delta: 0 },
+      papers: { value: publishedCount || 0, note: 'ตีพิมพ์ในรายงานการประชุม (Proceedings)' },
+      institutions: { value: uniqueInstitutions || 0 }, 
+      acceptance: { accepted: acceptanceRate, rejected: 100 - acceptanceRate },
+      tracks: trackArr.length > 0 ? trackArr : [{ id: 'cs', label: 'General', value: totalSubmittedCount || 0 }],
+      satisfaction: 0
+    };
 
     dataByYear.value = statsMap;
     availableYears.value = Object.keys(statsMap).sort((a, b) => b.localeCompare(a));
@@ -84,7 +104,7 @@ const currentData = computed(() => {
     yearLabel: year.value,
     participants: { value: 0, delta: 0 },
     papers: { value: 0, note: '' },
-    speakers: { value: 0 },
+    institutions: { value: 0 },
     acceptance: { accepted: 0, rejected: 0 },
     tracks: [],
     satisfaction: 0
@@ -95,16 +115,137 @@ const maxTrack = computed(() => {
   return Math.max(...(currentData.value.tracks || []).map((t) => t.value), 1);
 });
 
-const downloadBlob = (filename, mime, content) => {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+const generatePdf = async () => {
+  try {
+    isLoading.value = true;
+    const { jsPDF } = await import('jspdf');
+    const autoTableModule = await import('jspdf-autotable');
+    const autoTable = autoTableModule.default || autoTableModule.autoTable || autoTableModule;
+
+    const doc = new jsPDF();
+    
+    // Helper to get base64
+    const getBase64 = async (url) => {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const buffer = await res.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return window.btoa(binary);
+    };
+
+    // Load Fonts
+    const fontRegularBase64 = await getBase64('/fonts/Sarabun-Regular.ttf');
+    const fontBoldBase64 = await getBase64('/fonts/Sarabun-Bold.ttf');
+    
+    if (fontRegularBase64) {
+      doc.addFileToVFS('Sarabun-Regular.ttf', fontRegularBase64);
+      doc.addFont('Sarabun-Regular.ttf', 'Sarabun', 'normal');
+    }
+    if (fontBoldBase64) {
+      doc.addFileToVFS('Sarabun-Bold.ttf', fontBoldBase64);
+      doc.addFont('Sarabun-Bold.ttf', 'Sarabun', 'bold');
+    }
+    
+    doc.setFont('Sarabun', 'normal');
+
+    // Load Logos
+    const logoUni = await getBase64('/images/rajabhat_bru_logo.png');
+    const logoFac = await getBase64('/images/SCI-BRU-Logo.png');
+
+    // Header with Centered Logos
+    let logoStartY = 10;
+    let logoHeight = 25;
+    let gap = 8;
+    let totalLogosWidth = 0;
+    let w1 = 0, w2 = 0;
+
+    if (logoUni) {
+      const props = doc.getImageProperties(logoUni);
+      w1 = (props.width * logoHeight) / props.height;
+      totalLogosWidth += w1;
+    }
+    if (logoFac) {
+      const props = doc.getImageProperties(logoFac);
+      w2 = (props.width * logoHeight) / props.height;
+      totalLogosWidth += w2;
+    }
+    if (logoUni && logoFac) totalLogosWidth += gap;
+
+    let startX = (210 - totalLogosWidth) / 2;
+
+    if (logoUni) {
+      doc.addImage(logoUni, 'PNG', startX, logoStartY, w1, logoHeight);
+      startX += w1 + gap;
+    }
+    if (logoFac) {
+      // Adjust faculty logo y slightly if needed for alignment, but usually same height works
+      doc.addImage(logoFac, 'PNG', startX, logoStartY, w2, logoHeight);
+    }
+
+    doc.setFontSize(20);
+    doc.setFont('Sarabun', 'bold');
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.text(`รายงานสรุปสถิติการประชุมวิชาการ`, 105, 48, { align: 'center' });
+    doc.setFontSize(16);
+    doc.text(`ประจำปี ${year.value}`, 105, 58, { align: 'center' });
+    
+    // Line separator
+    doc.setDrawColor(226, 232, 240);
+    doc.line(15, 65, 195, 65);
+
+    // Key Metrics Section
+    doc.setFontSize(14);
+    doc.setFont('Sarabun', 'bold');
+    doc.setTextColor(147, 51, 234); // purple-600
+    doc.text('ภาพรวมความสำเร็จ (Key Metrics)', 15, 75);
+    
+    doc.setFontSize(12);
+    doc.setFont('Sarabun', 'normal');
+    doc.setTextColor(71, 85, 105); // slate-600
+    doc.text(`• สถาบันที่เข้าร่วม (Institutions)  ${currentData.value.institutions?.value || currentData.value.speakers?.value || 0} สถาบัน`, 20, 85);
+    doc.text(`• บทความที่ตีพิมพ์ (Published Papers)  ${currentData.value.papers.value} บทความ`, 20, 93);
+    doc.text(`• ผู้เข้าร่วมงาน (Participants)  ${currentData.value.participants.value} คน`, 20, 101);
+    doc.text(`• อัตราการตอบรับบทความ (Acceptance Rate)  ${currentData.value.acceptance.accepted}%`, 20, 109);
+    
+    if (currentData.value.tracks && currentData.value.tracks.length > 0) {
+      doc.setFontSize(14);
+      doc.setFont('Sarabun', 'bold');
+      doc.setTextColor(147, 51, 234);
+      doc.text('การกระจายตัวของบทความแยกตามสาขา (Tracks)', 15, 125);
+      
+      const trackData = currentData.value.tracks.map(t => [t.label, `${t.value} บทความ`]);
+      autoTable(doc, {
+        startY: 132,
+        head: [['สาขาวิชา (Track)', 'จำนวนบทความ (Papers)']],
+        body: trackData,
+        styles: { font: 'Sarabun', fontStyle: 'normal', fontSize: 11, textColor: [71, 85, 105] },
+        headStyles: { fillColor: [147, 51, 234], textColor: [255, 255, 255], font: 'Sarabun', fontStyle: 'bold' },
+        theme: 'grid'
+      });
+    }
+
+    // Footer
+    const pageCount = doc.internal.getNumberOfPages();
+    doc.setFontSize(10);
+    doc.setFont('Sarabun', 'normal');
+    doc.setTextColor(148, 163, 184);
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.text(`หน้า ${i} จาก ${pageCount}`, 105, 285, { align: 'center' });
+      doc.text('สถาบันวิจัยและพัฒนา มหาวิทยาลัยราชภัฏบุรีรัมย์', 105, 290, { align: 'center' });
+    }
+    
+    doc.save(`BRICC-Statistics-${year.value}.pdf`);
+  } catch (err) {
+    console.error('PDF Generation Error:', err);
+    alert('ไม่สามารถสร้างไฟล์ PDF ได้ กรุณาลองใหม่อีกครั้ง');
+  } finally {
+    isLoading.value = false;
+  }
 };
 </script>
 
@@ -144,26 +285,34 @@ const downloadBlob = (filename, mime, content) => {
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div class="rounded-3xl bg-white border border-slate-200 p-5">
-              <div class="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Users class="w-3.5 h-3.5" /> Participants</div>
+              <div class="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">
+                <Building2 class="w-3.5 h-3.5" /> INSTITUTIONS
+              </div>
+              <div class="mt-2 flex items-end justify-between gap-3">
+                <div class="text-3xl font-black text-slate-900">{{ currentData.institutions?.value || currentData.speakers?.value || 0 }}</div>
+              </div>
+              <div class="mt-2 text-xs font-semibold text-slate-500">สถาบันการศึกษาและหน่วยงานทั่วประเทศ</div>
+            </div>
+
+            <div class="rounded-3xl bg-white border border-slate-200 p-5">
+              <div class="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">
+                <FileText class="w-3.5 h-3.5" /> PUBLISHED PAPERS
+              </div>
+              <div class="mt-2 text-3xl font-black text-slate-900">{{ currentData.papers.value }}</div>
+              <div class="mt-2 text-xs font-semibold text-slate-500">ตีพิมพ์ในรายงานการประชุม (Proceedings)</div>
+            </div>
+
+            <div class="rounded-3xl bg-white border border-slate-200 p-5">
+              <div class="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">
+                <Users class="w-3.5 h-3.5" /> PARTICIPANTS
+              </div>
               <div class="mt-2 flex items-end justify-between gap-3">
                 <div class="text-3xl font-black text-slate-900">{{ currentData.participants.value }}</div>
                 <div v-if="currentData.participants.delta > 0" class="text-xs font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full flex items-center gap-1">
                   <TrendingUp class="w-3 h-3" /> +{{ currentData.participants.delta }}%
                 </div>
               </div>
-              <div class="mt-2 text-xs font-semibold text-slate-500">จำนวนผู้เข้าร่วมงาน</div>
-            </div>
-
-            <div class="rounded-3xl bg-white border border-slate-200 p-5">
-              <div class="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><FileText class="w-3.5 h-3.5" /> Papers</div>
-              <div class="mt-2 text-3xl font-black text-slate-900">{{ currentData.papers.value }}</div>
-              <div class="mt-2 text-xs font-semibold text-slate-500">{{ currentData.papers.note || 'จำนวนบทความทั้งหมด' }}</div>
-            </div>
-
-            <div class="rounded-3xl bg-white border border-slate-200 p-5">
-              <div class="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1"><Mic class="w-3.5 h-3.5" /> Speakers</div>
-              <div class="mt-2 text-3xl font-black text-slate-900">{{ currentData.speakers.value }}</div>
-              <div class="mt-2 text-xs font-semibold text-slate-500">จำนวนวิทยากร</div>
+              <div class="mt-2 text-xs font-semibold text-slate-500">นักวิจัย นักวิชาการ และผู้สนใจ</div>
             </div>
           </div>
         </section>
@@ -266,14 +415,13 @@ const downloadBlob = (filename, mime, content) => {
 
           <div class="flex justify-end">
             <button
-              @click="() => {
-                const content = `BRICC Conference Statistics Report\nYear: ${year}\n\nParticipants: ${currentData.participants.value}\nPapers: ${currentData.papers.value}\nSpeakers: ${currentData.speakers.value}\nAcceptance: ${currentData.acceptance.accepted}%\n`;
-                downloadBlob(`BRICC-Statistics-${year}.pdf`, 'application/pdf', content);
-              }"
+              @click="generatePdf"
+              :disabled="isLoading"
               class="h-11 px-5 rounded-2xl bg-slate-900 text-white text-sm font-black hover:bg-slate-800 transition-colors inline-flex items-center gap-2"
+              :class="{'opacity-70 cursor-wait': isLoading}"
             >
               <Download class="w-5 h-5" />
-              ดาวน์โหลดรายงานสรุป (PDF)
+              {{ isLoading ? 'กำลังสร้างเอกสาร...' : 'ดาวน์โหลดรายงานสรุป (PDF)' }}
             </button>
           </div>
         </section>

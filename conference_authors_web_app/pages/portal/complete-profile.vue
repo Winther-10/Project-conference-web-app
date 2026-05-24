@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router';
 import { User, Phone, FileText, MoveRight, ChevronDown, Check, Search, AlertCircle, CheckCircle2, XCircle } from 'lucide-vue-next';
 import { useAuth } from '~/composables/useAuth';
 import { useSupabase } from '~/composables/useSupabase';
-import { PREFIXES, ACADEMIC_POSITIONS, THAI_PROVINCES } from '~/utils/constants';
+import { PREFIXES, ACADEMIC_POSITIONS, THAI_PROVINCES, THAI_UNIVERSITIES } from '~/utils/constants';
 
 const router = useRouter();
 const { userProfile, currentUser } = useAuth();
@@ -13,6 +13,7 @@ const supabase = useSupabase();
 
 const isLoading = ref(false);
 const toast = ref(null);
+const acceptTerms = ref(false);
 
 const form = ref({
   prefix: '',
@@ -30,6 +31,7 @@ const form = ref({
 const searchStates = ref({
   prefix: { show: false, search: '' },
   prefixEn: { show: false, search: '' },
+  institution: { show: false, search: '' },
   position: { show: false, search: '' },
   province: { show: false, search: '' }
 });
@@ -52,6 +54,20 @@ const filteredPositions = computed(() => {
 const filteredProvinces = computed(() => {
   const s = searchStates.value.province.search.toLowerCase();
   return s ? THAI_PROVINCES.filter(p => p.toLowerCase().includes(s)) : THAI_PROVINCES;
+});
+
+const filteredInstitutions = computed(() => {
+  const s = searchStates.value.institution.search.toLowerCase();
+  return s ? THAI_UNIVERSITIES.filter(p => p.toLowerCase().includes(s)) : THAI_UNIVERSITIES;
+});
+
+// Phone sanitize watcher
+watch(() => form.value.phone, (newVal) => {
+  if (!newVal) return;
+  let filtered = newVal.replace(/[^0-9-]/g, '');
+  filtered = filtered.replace(/-+/g, '-');
+  if (filtered.startsWith('-')) filtered = filtered.substring(1);
+  if (filtered !== newVal) form.value.phone = filtered;
 });
 
 const showToast = (message, tone = 'ok') => {
@@ -88,11 +104,30 @@ const checkProfileAndRedirect = () => {
   return false;
 };
 
-watch(userProfile, () => {
+watch(userProfile, (newVal) => {
+  console.log('[complete-profile] userProfile changed:', newVal);
   checkProfileAndRedirect();
 }, { immediate: true });
 
 onMounted(async () => {
+  // If userProfile isn't loaded yet but we have a user, fetch it manually to be safe
+  if (!userProfile.value) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle();
+        
+      if (profile) {
+        console.log('[complete-profile] Manually fetched profile:', profile);
+        userProfile.value = profile;
+        checkProfileAndRedirect();
+      }
+    }
+  }
+
   // Handle click outside dropdown
   window.addEventListener('click', (e) => {
     Object.keys(searchStates.value).forEach(key => {
@@ -104,24 +139,64 @@ onMounted(async () => {
 });
 
 const handleSaveProfile = async () => {
-  if (!form.value.prefix || !form.value.firstName.trim() || !form.value.lastName.trim() || !form.value.prefixEn || !form.value.firstNameEn.trim() || !form.value.lastNameEn.trim() || !form.value.phone.trim() || !form.value.institution.trim()) {
-    showToast('กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วน', 'err');
+  if (!form.value.prefix || !form.value.firstName.trim() || !form.value.lastName.trim()) {
+    showToast('กรุณากรอกคำนำหน้า ชื่อ และนามสกุล (ภาษาไทย) ให้ครบ', 'err');
+    return;
+  }
+  if (!form.value.prefixEn || !form.value.firstNameEn.trim() || !form.value.lastNameEn.trim()) {
+    showToast('กรุณากรอกคำนำหน้า ชื่อ และนามสกุล (ภาษาอังกฤษ) ให้ครบ', 'err');
+    return;
+  }
+  if (!form.value.institution.trim()) {
+    showToast('กรุณาเลือกหรือกรอกมหาวิทยาลัย/หน่วยงาน', 'err');
+    return;
+  }
+  const cleanPhone = form.value.phone.replace(/\D/g, '');
+  if (cleanPhone.length !== 10) {
+    showToast('เบอร์โทรศัพท์ต้องมี 10 หลัก (เฉพาะตัวเลข)', 'err');
+    return;
+  }
+  if (!form.value.academicPosition) {
+    showToast('กรุณาเลือกตำแหน่งทางวิชาการ', 'err');
+    return;
+  }
+  if (!form.value.province) {
+    showToast('กรุณาเลือกจังหวัด', 'err');
+    return;
+  }
+  if (!acceptTerms.value) {
+    showToast('กรุณายอมรับเงื่อนไขและข้อกำหนดก่อนดำเนินการ', 'err');
     return;
   }
   
   isLoading.value = true;
   try {
+    // Safety check for current user
+    let user = currentUser.value;
+    if (!user) {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      user = authUser;
+    }
+
+    if (!user) {
+      throw new Error('ไม่พบข้อมูลผู้ใช้งาน (Session Expired) กรุณาล็อกอินใหม่อีกครั้ง');
+    }
+
     // If the user logs in via Google and doesn't exist in `users` table yet, upsert it.
     const { error } = await supabase
       .from('users')
       .upsert({
-        user_id: currentUser.value.id,
-        email: currentUser.value.email,
+        user_id: user.id,
+        email: user.email,
         role: 'author',
+        password_hash: '[supabase-auth]',
         title: form.value.prefix,
+        title_en: form.value.prefixEn,
         first_name_th: form.value.firstName.trim(),
         last_name_th: form.value.lastName.trim(),
-        phone: form.value.phone.trim(),
+        first_name_en: form.value.firstNameEn.trim(),
+        last_name_en: form.value.lastNameEn.trim(),
+        phone: form.value.phone.replace(/\D/g, ''),
         institution: form.value.institution.trim(),
         academic_position: form.value.academicPosition,
         province: form.value.province,
@@ -130,36 +205,15 @@ const handleSaveProfile = async () => {
       
     if (error) throw error;
     
-    // Update local profile data
-    if (userProfile.value) {
-      Object.assign(userProfile.value, {
-        title: form.value.prefix,
-        first_name_th: form.value.firstName.trim(),
-        last_name_th: form.value.lastName.trim(),
-        title_en: form.value.prefixEn,
-        first_name_en: form.value.firstNameEn.trim(),
-        last_name_en: form.value.lastNameEn.trim(),
-        phone: form.value.phone.trim(),
-        institution: form.value.institution.trim(),
-        academic_position: form.value.academicPosition,
-        province: form.value.province
-      });
-    } else {
-      userProfile.value = {
-        user_id: currentUser.value.id,
-        email: currentUser.value.email,
-        role: 'author',
-        title: form.value.prefix,
-        first_name_th: form.value.firstName.trim(),
-        last_name_th: form.value.lastName.trim(),
-        title_en: form.value.prefixEn,
-        first_name_en: form.value.firstNameEn.trim(),
-        last_name_en: form.value.lastNameEn.trim(),
-        phone: form.value.phone.trim(),
-        institution: form.value.institution.trim(),
-        academic_position: form.value.academicPosition,
-        province: form.value.province
-      };
+    // Refresh the profile data into global state
+    const { data: newProfile } = await supabase
+      .from('users')
+      .select('*')
+      .eq('user_id', user.id)
+      .single();
+    
+    if (newProfile) {
+      userProfile.value = newProfile;
     }
 
     showToast('บันทึกข้อมูลเรียบร้อย กำลังเข้าสู่ระบบ...', 'ok');
@@ -167,7 +221,8 @@ const handleSaveProfile = async () => {
       router.push('/portal/dashboard');
     }, 1500);
   } catch (err) {
-    showToast('เกิดข้อผิดพลาดในการบันทึกข้อมูล', 'err');
+    console.error('Save Profile Error:', err);
+    showToast(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล', 'err');
   } finally {
     isLoading.value = false;
   }
@@ -207,6 +262,7 @@ const handleSaveProfile = async () => {
       <div class="text-center mb-10">
         <h1 class="text-3xl font-black text-purple-950 tracking-tight">เติมเต็มข้อมูลของคุณ</h1>
         <p class="mt-2 text-[15px] font-semibold text-purple-700/60">เราต้องการข้อมูลพื้นฐานอีกเล็กน้อยเพื่อนำไปใช้ในการออกใบประกาศนียบัตร</p>
+        <p class="mt-2 text-[11px] font-semibold text-purple-400">คลิกปุ่มแต่ละช่องเพื่อเลือกจากรายการ หากไม่พบตัวเลือกในรายการ ให้พิมพ์ในช่องค้นหาแล้วกด "ใช้ ..." ได้เลย</p>
       </div>
 
       <form @submit.prevent="handleSaveProfile" class="space-y-6">
@@ -240,10 +296,13 @@ const handleSaveProfile = async () => {
                 <div 
                   v-for="p in filteredPrefixes" 
                   :key="p"
-                  @click="form.prefix = p; searchStates.prefix.show = false"
+                  @click="form.prefix = p; searchStates.prefix.show = false; searchStates.prefix.search = ''"
                   class="px-4 py-2.5 text-[13px] font-semibold hover:bg-purple-50 cursor-pointer flex items-center justify-between"
                 >
                   {{ p }}
+                </div>
+                <div v-if="filteredPrefixes.length === 0 && searchStates.prefix.search" class="px-4 py-3 text-center border-t border-slate-50">
+                  <button type="button" @click="form.prefix = searchStates.prefix.search; searchStates.prefix.show = false; searchStates.prefix.search = ''" class="text-[12px] font-black text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg w-full hover:bg-purple-100">ใช้ "{{ searchStates.prefix.search }}"</button>
                 </div>
               </div>
             </div>
@@ -298,10 +357,13 @@ const handleSaveProfile = async () => {
                 <div 
                   v-for="p in filteredPrefixesEn" 
                   :key="p"
-                  @click="form.prefixEn = p; searchStates.prefixEn.show = false"
+                  @click="form.prefixEn = p; searchStates.prefixEn.show = false; searchStates.prefixEn.search = ''"
                   class="px-4 py-2.5 text-[13px] font-semibold hover:bg-purple-50 cursor-pointer flex items-center justify-between"
                 >
                   {{ p }}
+                </div>
+                <div v-if="filteredPrefixesEn.length === 0 && searchStates.prefixEn.search" class="px-4 py-3 text-center border-t border-slate-50">
+                  <button type="button" @click="form.prefixEn = searchStates.prefixEn.search; searchStates.prefixEn.show = false; searchStates.prefixEn.search = ''" class="text-[12px] font-black text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg w-full hover:bg-purple-100">ใช้ "{{ searchStates.prefixEn.search }}"</button>
                 </div>
               </div>
             </div>
@@ -334,29 +396,50 @@ const handleSaveProfile = async () => {
               <input
                 v-model="form.phone"
                 class="w-full h-12 px-4 pl-12 rounded-2xl bg-purple-50/50 border border-purple-100 text-[14px] font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-purple-300 transition-all"
-                required
+                placeholder="081-234-5678"
               />
               <Phone class="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400" />
+            </div>
+            <div v-if="form.phone && form.phone.replace(/\D/g, '').length !== 10" class="mt-1.5 text-[11px] font-bold text-rose-500 flex items-center gap-1">
+              <AlertCircle class="w-3 h-3" /> เบอร์โทรต้องมี 10 หลัก (ขณะนี้มี {{ form.phone.replace(/\D/g, '').length }} หลัก)
             </div>
           </div>
         </div>
 
         <div class="pt-2">
           <label class="text-[12px] font-black text-slate-700 block uppercase tracking-wide mb-2">สถาบัน/หน่วยงาน (Institution) *</label>
-          <div class="relative">
-            <input
-              v-model="form.institution"
-              class="w-full h-12 px-4 pl-12 rounded-2xl bg-purple-50/50 border border-purple-100 text-[14px] font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-purple-300 transition-all"
-              required
-            />
-            <FileText class="absolute left-4 top-1/2 -translate-y-1/2 w-[18px] h-[18px] text-slate-400" />
+          <p class="text-[11px] font-semibold text-slate-400 mb-2">เลือกจากรายการ หรือพิมพ์ชื่อสถาบันตรงๆ หากไม่พบในรายการ พิมพ์ชื่อในช่องค้นหาแล้วกด "ตกลงใช้" ได้เลย</p>
+          <div class="relative search-dropdown-institution">
+            <div
+              @click="searchStates.institution.show = !searchStates.institution.show"
+              class="h-12 px-4 rounded-2xl bg-purple-50/50 border border-purple-100 flex items-center justify-between cursor-pointer hover:border-purple-300 transition-all"
+            >
+              <span class="text-[14px] font-semibold truncate pr-2" :class="form.institution ? 'text-slate-900' : 'text-slate-400'">{{ form.institution || 'เลือกหรือพิมพ์ชื่อ...' }}</span>
+              <ChevronDown class="w-4 h-4 text-slate-400 shrink-0 transition-transform" :class="{ 'rotate-180': searchStates.institution.show }" />
+            </div>
+            <div v-if="searchStates.institution.show" class="absolute top-full left-0 right-0 mt-2 bg-white border border-purple-100 rounded-2xl shadow-xl z-50 overflow-hidden">
+              <div class="p-2 border-b border-purple-50">
+                <div class="relative">
+                  <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <input v-model="searchStates.institution.search" class="w-full h-9 pl-9 pr-4 rounded-xl bg-slate-50 text-[13px] font-semibold focus:outline-none" placeholder="ค้นหา..." @click.stop />
+                </div>
+              </div>
+              <div class="max-h-48 overflow-y-auto custom-scrollbar">
+                <div v-for="p in filteredInstitutions" :key="p" @click="form.institution = p; searchStates.institution.show = false; searchStates.institution.search = ''" class="px-4 py-2.5 text-[13px] font-semibold hover:bg-purple-50 cursor-pointer flex items-center justify-between">
+                  <span class="truncate">{{ p }}</span>
+                </div>
+                <div v-if="filteredInstitutions.length === 0 && searchStates.institution.search" class="px-4 py-3 text-center border-t border-slate-50">
+                  <button type="button" @click="form.institution = searchStates.institution.search; searchStates.institution.show = false; searchStates.institution.search = ''" class="text-[12px] font-black text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg w-full hover:bg-purple-100">ตกลงใช้ "{{ searchStates.institution.search }}"</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
           <!-- Position -->
           <div class="relative search-dropdown-position">
-            <label class="text-[12px] font-black text-slate-700 block uppercase tracking-wide mb-2">ตำแหน่งทางวิชาการ</label>
+            <label class="text-[12px] font-black text-slate-700 block uppercase tracking-wide mb-2">ตำแหน่งทางวิชาการ *</label>
             <div 
               @click="searchStates.position.show = !searchStates.position.show"
               class="h-12 px-4 rounded-2xl bg-purple-50/50 border border-purple-100 flex items-center justify-between cursor-pointer hover:border-purple-300 transition-all"
@@ -383,10 +466,13 @@ const handleSaveProfile = async () => {
                 <div 
                   v-for="p in filteredPositions" 
                   :key="p"
-                  @click="form.academicPosition = p; searchStates.position.show = false"
+                  @click="form.academicPosition = p; searchStates.position.show = false; searchStates.position.search = ''"
                   class="px-4 py-2.5 text-[13px] font-semibold hover:bg-purple-50 cursor-pointer flex items-center justify-between"
                 >
                   <span class="truncate">{{ p }}</span>
+                </div>
+                <div v-if="filteredPositions.length === 0 && searchStates.position.search" class="px-4 py-3 text-center border-t border-slate-50">
+                  <button type="button" @click="form.academicPosition = searchStates.position.search; searchStates.position.show = false; searchStates.position.search = ''" class="text-[12px] font-black text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg w-full hover:bg-purple-100">ใช้ "{{ searchStates.position.search }}"</button>
                 </div>
               </div>
             </div>
@@ -394,7 +480,7 @@ const handleSaveProfile = async () => {
 
           <!-- Province -->
           <div class="relative search-dropdown-province">
-            <label class="text-[12px] font-black text-slate-700 block uppercase tracking-wide mb-2">จังหวัด (Province)</label>
+            <label class="text-[12px] font-black text-slate-700 block uppercase tracking-wide mb-2">จังหวัด (Province) *</label>
             <div 
               @click="searchStates.province.show = !searchStates.province.show"
               class="h-12 px-4 rounded-2xl bg-purple-50/50 border border-purple-100 flex items-center justify-between cursor-pointer hover:border-purple-300 transition-all"
@@ -431,10 +517,30 @@ const handleSaveProfile = async () => {
           </div>
         </div>
 
+        <!-- Terms & Conditions -->
+        <div class="mt-6 flex items-start gap-3">
+          <input
+            type="checkbox"
+            v-model="acceptTerms"
+            id="accept-terms"
+            class="mt-1 h-4 w-4 rounded border-purple-300 text-purple-600 focus:ring-purple-500 accent-purple-600 cursor-pointer"
+          />
+          <label for="accept-terms" class="text-[13px] font-semibold text-slate-600 cursor-pointer leading-relaxed">
+            ข้าพเจ้ายอมรับ
+            <a href="/terms" target="_blank" class="text-purple-600 hover:text-purple-500 underline underline-offset-2">เงื่อนไขและข้อกำหนด</a>
+            และ
+            <a href="/privacy" target="_blank" class="text-purple-600 hover:text-purple-500 underline underline-offset-2">นโยบายความเป็นส่วนตัว</a>
+            ของการประชุมวิชาการ BRICC Festival 2027
+          </label>
+        </div>
+
         <button
           type="submit"
-          :disabled="isLoading"
-          class="mt-8 h-14 w-full rounded-[24px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-black text-[15px] inline-flex items-center justify-center gap-2 hover:shadow-lg hover:shadow-purple-300/40 hover:-translate-y-0.5 transition-all duration-300 shadow-md disabled:opacity-50"
+          :disabled="isLoading || !acceptTerms"
+          :class="[
+            'mt-6 h-14 w-full rounded-[24px] text-[15px] font-black inline-flex items-center justify-center gap-2 transition-all duration-300 shadow-md',
+            (acceptTerms && !isLoading) ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:shadow-lg hover:shadow-purple-300/40 hover:-translate-y-0.5' : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+          ]"
         >
           {{ isLoading ? 'กำลังบันทึกข้อมูล...' : 'บันทึกข้อมูลและเข้าสู่ระบบ' }}
           <MoveRight v-if="!isLoading" class="w-5 h-5" />

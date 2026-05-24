@@ -1,7 +1,7 @@
 <script setup>
 definePageMeta({ middleware: 'auth', layout: 'admin' });
 import { ref, computed, onMounted } from 'vue';
-import { Trophy, Award, Star, RefreshCw, CheckCircle2, Medal, ChevronDown, ChevronUp, FileText, Megaphone, Download } from 'lucide-vue-next';
+import { Trophy, Award, Star, RefreshCw, CheckCircle2, Medal, ChevronDown, ChevronUp, FileText, Megaphone, Download, DollarSign, Users } from 'lucide-vue-next';
 
 const supabase = useSupabase();
 const papers = ref([]);
@@ -10,8 +10,23 @@ const sortKey = ref('avg_score');
 const sortDir = ref('desc');
 const announcing = ref(null);
 
+const filterYear = ref('all');
+const activeAcademicYear = ref(null);
+const finalistCount = ref(20);
+
+const fetchSettings = async () => {
+  const { data } = await supabase.from('system_settings').select('config_json').single();
+  if (data?.config_json?.conference) {
+    const conf = data.config_json.conference;
+    activeAcademicYear.value = conf.academicYear || conf.year || new Date().getFullYear();
+    if (filterYear.value === 'all') filterYear.value = String(activeAcademicYear.value);
+    finalistCount.value = conf.finalistCount || 20;
+  }
+};
+
 const loadData = async () => {
   loading.value = true;
+  await fetchSettings();
   try {
     const { data: papersData } = await supabase
       .from('papers')
@@ -58,7 +73,11 @@ const getAuthorName = (id) => {
 };
 
 const sortedPapers = computed(() => {
-  const arr = [...papers.value];
+  let arr = [...papers.value];
+  if (filterYear.value !== 'all') {
+    const yy = filterYear.value.slice(-2);
+    arr = arr.filter(p => p.paper_code && p.paper_code.includes(`-${yy}`));
+  }
   arr.sort((a, b) => {
     const av = a[sortKey.value] ?? 0, bv = b[sortKey.value] ?? 0;
     return sortDir.value === 'desc' ? bv - av : av - bv;
@@ -66,14 +85,49 @@ const sortedPapers = computed(() => {
   return arr;
 });
 
+const yearOptions = computed(() => {
+  const years = new Set();
+  if (activeAcademicYear.value) years.add(String(activeAcademicYear.value));
+  papers.value.forEach(p => {
+    if (p.paper_code) {
+      const match = p.paper_code.match(/-(\d{2})/);
+      if (match) years.add('20' + match[1]);
+    }
+  });
+  return Array.from(years).sort((a, b) => Number(b) - Number(a));
+});
+
 const toggleSort = (key) => {
   if (sortKey.value === key) sortDir.value = sortDir.value === 'desc' ? 'asc' : 'desc';
   else { sortKey.value = key; sortDir.value = 'desc'; }
 };
 
+const prizeInfoMap = {
+  champion: { prize_money: 5000, prize_description: 'โล่พระราชทานสมเด็จพระกนิษฐาธิราชเจ้า กรมสมเด็จพระเทพรัตนราชสุดาฯ สยามบรมราชกุมารี พร้อมเกียรติบัตรและเงินรางวัล 5,000 บาท' },
+  runner_up_1: { prize_money: 4000, prize_description: 'เกียรติบัตรพร้อมเงินรางวัล 4,000 บาท' },
+  runner_up_2: { prize_money: 3000, prize_description: 'เกียรติบัตรพร้อมเงินรางวัล 3,000 บาท' },
+  honorable_mention: { prize_money: 1000, prize_description: 'เกียรติบัตรพร้อมเงินรางวัล 1,000 บาท' },
+};
+
+const getAwardTypeForPosition = (index) => {
+  if (index === 0) return 'champion';
+  if (index === 1) return 'runner_up_1';
+  if (index === 2) return 'runner_up_2';
+  if (index >= 3 && index <= 5) return 'honorable_mention';
+  return null;
+};
+
+const totalPrizeMoney = computed(() => {
+  return sortedPapers.value
+    .filter(p => p.has_award && p.award_type)
+    .reduce((sum, p) => sum + (prizeInfoMap[p.award_type]?.prize_money || 0), 0);
+});
+
 const announceAward = async (paper, awardType) => {
   announcing.value = paper.paper_id;
+  const prizeInfo = prizeInfoMap[awardType] || {};
   try {
+    const levelMap = { champion: 'excellent', runner_up_1: 'distinguished', runner_up_2: 'good', honorable_mention: 'honorable' };
     const { error } = await supabase.from('awards').upsert({
       ...(paper.award_id ? { id: paper.award_id } : {}),
       paper_id: paper.paper_id,
@@ -81,13 +135,15 @@ const announceAward = async (paper, awardType) => {
       title: paper.title_th,
       title_th: paper.title_th,
       award_type: awardType,
-      level: awardType === 'gold' ? 'excellent' : awardType === 'silver' ? 'distinguished' : 'good',
+      level: levelMap[awardType] || 'good',
       type: 'poster',
       university: paper.university || '-',
       authors: paper.authors || [],
       abstract: paper.abstract || '-',
       track: paper.track || '-',
       phase2_avg_score: paper.avg_score,
+      prize_money: prizeInfo.prize_money || 0,
+      prize_description: prizeInfo.prize_description || '',
       announced_at: new Date().toISOString(),
     });
     if (error) throw error;
@@ -110,20 +166,23 @@ const cancelAward = async (paper) => {
 };
 
 const awardLabelMap = {
-  gold: '🥇 ชนะเลิศ',
-  silver: '🥈 รองชนะเลิศอันดับ 1',
-  bronze: '🥉 รองชนะเลิศอันดับ 2',
+  champion: '🏆 ชนะเลิศ',
+  runner_up_1: '🥈 รองชนะเลิศอันดับ 1',
+  runner_up_2: '🥉 รองชนะเลิศอันดับ 2',
+  honorable_mention: '🎖️ ชมเชย',
 };
 const awardColorMap = {
-  gold: 'bg-amber-50 border-amber-200 text-amber-700',
-  silver: 'bg-slate-50 border-slate-300 text-slate-700',
-  bronze: 'bg-orange-50 border-orange-200 text-orange-700',
+  champion: 'bg-amber-50 border-amber-200 text-amber-700',
+  runner_up_1: 'bg-slate-50 border-slate-300 text-slate-700',
+  runner_up_2: 'bg-orange-50 border-orange-200 text-orange-700',
+  honorable_mention: 'bg-sky-50 border-sky-200 text-sky-700',
 };
 
 onMounted(loadData);
 </script>
 
 <template>
+  <ClientOnly>
   <div class="p-8 pb-32 font-['Sarabun'] animate-fade-in">
     <div class="flex items-center justify-between mb-8">
       <div>
@@ -134,6 +193,14 @@ onMounted(loadData);
         <p class="text-sm text-slate-500 mt-1">สรุปอันดับคะแนน Phase 2 · ประกาศรางวัล · สร้างเกียรติบัตร</p>
       </div>
       <div class="flex items-center gap-3">
+        <!-- Year Filter -->
+        <div class="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2 shadow-sm">
+          <span class="text-xs font-black text-slate-500 uppercase tracking-widest">Year:</span>
+          <select v-model="filterYear" class="text-sm font-black text-slate-800 bg-transparent focus:outline-none border-none">
+            <option value="all">All</option>
+            <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
+          </select>
+        </div>
         <button @click="loadData" class="flex items-center gap-2 text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-4 py-2.5 rounded-xl transition-all">
           <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" /> รีเฟรช
         </button>
@@ -144,20 +211,20 @@ onMounted(loadData);
     </div>
 
     <!-- Stats -->
-    <div class="grid grid-cols-3 gap-5 mb-8" v-if="!loading">
+    <div class="grid grid-cols-5 gap-5 mb-8" v-if="!loading">
       <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div class="flex items-center gap-3 mb-2">
           <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center"><FileText class="w-5 h-5 text-indigo-600" /></div>
           <div class="text-xs font-bold text-slate-500">บทความที่มีคะแนน Phase 2</div>
         </div>
-        <div class="text-3xl font-black text-slate-800">{{ papers.length }}</div>
+        <div class="text-3xl font-black text-slate-800">{{ sortedPapers.length }}</div>
       </div>
       <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div class="flex items-center gap-3 mb-2">
           <div class="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center"><Trophy class="w-5 h-5 text-amber-600" /></div>
           <div class="text-xs font-bold text-slate-500">ประกาศรางวัลแล้ว</div>
         </div>
-        <div class="text-3xl font-black text-amber-600">{{ papers.filter(p => p.has_award).length }}</div>
+        <div class="text-3xl font-black text-amber-600">{{ sortedPapers.filter(p => p.has_award).length }}</div>
       </div>
       <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
         <div class="flex items-center gap-3 mb-2">
@@ -165,6 +232,20 @@ onMounted(loadData);
           <div class="text-xs font-bold text-slate-500">คะแนนสูงสุด</div>
         </div>
         <div class="text-3xl font-black text-emerald-600">{{ sortedPapers[0]?.avg_score || '-' }}</div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center"><DollarSign class="w-5 h-5 text-violet-600" /></div>
+          <div class="text-xs font-bold text-slate-500">เงินรางวัลรวม</div>
+        </div>
+        <div class="text-3xl font-black text-violet-600">{{ totalPrizeMoney.toLocaleString() }} <span class="text-sm font-bold text-slate-400">฿</span></div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-10 h-10 rounded-xl bg-cyan-50 flex items-center justify-center"><Users class="w-5 h-5 text-cyan-600" /></div>
+          <div class="text-xs font-bold text-slate-500">Finalist Count</div>
+        </div>
+        <div class="text-3xl font-black text-cyan-600">{{ finalistCount }}</div>
       </div>
     </div>
 
@@ -181,7 +262,7 @@ onMounted(loadData);
     <!-- Score Table -->
     <div v-else class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-        <div class="font-bold text-slate-800">อันดับคะแนน Phase 2 — {{ papers.length }} บทความ</div>
+        <div class="font-bold text-slate-800">อันดับคะแนน Phase 2 — {{ sortedPapers.length }} บทความ</div>
         <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5 font-bold">🔒 เฉพาะ Admin</div>
       </div>
       <div class="overflow-x-auto">
@@ -204,6 +285,7 @@ onMounted(loadData);
                 </span>
               </th>
               <th class="text-center px-6 py-4 text-xs font-black text-slate-500 uppercase">รายละเอียด</th>
+              <th class="text-center px-6 py-4 text-xs font-black text-slate-500 uppercase">เงินรางวัล</th>
               <th class="text-center px-6 py-4 text-xs font-black text-slate-500 uppercase">ประกาศรางวัล</th>
             </tr>
           </thead>
@@ -211,8 +293,8 @@ onMounted(loadData);
             <tr v-for="(paper, index) in sortedPapers" :key="paper.paper_id" class="hover:bg-slate-50 transition-colors">
               <td class="px-6 py-5">
                 <div class="flex items-center justify-center w-10 h-10 rounded-xl font-black text-lg"
-                  :class="{ 'bg-amber-50 text-amber-600': index===0, 'bg-slate-100 text-slate-600': index===1, 'bg-orange-50 text-orange-600': index===2, 'bg-white text-slate-400 border border-slate-200': index>2 }">
-                  {{ index===0?'🥇':index===1?'🥈':index===2?'🥉':index+1 }}
+                  :class="{ 'bg-amber-50 text-amber-600': index===0, 'bg-slate-100 text-slate-600': index===1, 'bg-orange-50 text-orange-600': index===2, 'bg-sky-50 text-sky-600': index>=3&&index<=5, 'bg-white text-slate-400 border border-slate-200': index>5 }">
+                  {{ index===0?'🏆':index===1?'🥈':index===2?'🥉':index>=3&&index<=5?'🎖️':index+1 }}
                 </div>
               </td>
               <td class="px-6 py-5 min-w-[160px]">
@@ -222,9 +304,15 @@ onMounted(loadData);
               <td class="px-6 py-5 min-w-[250px]">
                 <div class="font-bold text-slate-800 text-sm leading-snug line-clamp-2">{{ paper.title_th }}</div>
                 <div v-if="paper.track" class="text-[10px] text-slate-400 mt-1">{{ paper.track }}</div>
-                <div v-if="paper.has_award" class="mt-1.5">
-                  <span class="inline-flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-full border" :class="awardColorMap[paper.award_type] || 'bg-slate-50 border-slate-200 text-slate-600'">
-                    <Trophy class="w-3 h-3" /> {{ awardLabelMap[paper.award_type] || paper.award_type }}
+                <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span v-if="index < finalistCount" class="inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-md bg-teal-50 border border-teal-200 text-teal-700">
+                    ✅ ผ่านเข้ารอบ (Finalist)
+                  </span>
+                  <span v-else class="inline-flex items-center gap-1 text-[9px] font-black px-2 py-0.5 rounded-md bg-slate-50 border border-slate-200 text-slate-500">
+                    📋 เข้าร่วม (Participant)
+                  </span>
+                  <span v-if="paper.has_award" class="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-0.5 rounded-full border" :class="awardColorMap[paper.award_type] || 'bg-slate-50 border-slate-200 text-slate-600'">
+                    <Trophy class="w-2.5 h-2.5" /> {{ awardLabelMap[paper.award_type] || paper.award_type }}
                   </span>
                 </div>
               </td>
@@ -258,6 +346,13 @@ onMounted(loadData);
                 </details>
               </td>
               <td class="px-6 py-5 text-center">
+                <template v-if="paper.has_award && prizeInfoMap[paper.award_type]">
+                  <div class="text-sm font-black text-violet-600">{{ prizeInfoMap[paper.award_type].prize_money.toLocaleString() }} ฿</div>
+                  <div class="text-[9px] text-slate-400 mt-0.5 max-w-[140px] mx-auto leading-tight">{{ prizeInfoMap[paper.award_type].prize_description }}</div>
+                </template>
+                <span v-else class="text-[10px] text-slate-300">—</span>
+              </td>
+              <td class="px-6 py-5 text-center">
                 <div v-if="paper.has_award" class="space-y-1">
                   <div class="text-xs font-bold text-emerald-600 flex items-center justify-center gap-1">
                     <CheckCircle2 class="w-4 h-4" /> ประกาศแล้ว
@@ -266,11 +361,11 @@ onMounted(loadData);
                     ยกเลิกประกาศ
                   </button>
                 </div>
-                <div v-else-if="index < 3" class="space-y-1.5">
-                  <button @click="announceAward(paper, index===0?'gold':index===1?'silver':'bronze')" :disabled="announcing===paper.paper_id"
+                <div v-else-if="getAwardTypeForPosition(index)" class="space-y-1.5">
+                  <button @click="announceAward(paper, getAwardTypeForPosition(index))" :disabled="announcing===paper.paper_id"
                     class="w-full text-[10px] font-black px-3 py-2 rounded-xl border transition-all disabled:opacity-50"
-                    :class="{ 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100': index===0, 'bg-slate-50 border-slate-300 text-slate-700 hover:bg-slate-100': index===1, 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100': index===2 }">
-                    <Megaphone class="w-3 h-3 inline mr-1" /> {{ awardLabelMap[index===0?'gold':index===1?'silver':'bronze'] }}
+                    :class="awardColorMap[getAwardTypeForPosition(index)]">
+                    <Megaphone class="w-3 h-3 inline mr-1" /> {{ awardLabelMap[getAwardTypeForPosition(index)] }}
                   </button>
                 </div>
                 <div v-else class="text-[10px] text-slate-400 font-bold">—</div>
@@ -281,4 +376,5 @@ onMounted(loadData);
       </div>
     </div>
   </div>
+  </ClientOnly>
 </template>

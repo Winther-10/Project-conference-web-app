@@ -8,6 +8,12 @@ export default defineNuxtConfig({
       autoprefixer: {}
     }
   },
+  // Portal pages require client-side Auth state (Supabase session is in the browser).
+  // Disabling SSR for /portal/** prevents Hydration Mismatches and tab-switch data-load issues.
+  routeRules: {
+    '/portal/**': { ssr: false },
+    '/auth/**':   { ssr: false },
+  },
   runtimeConfig: {
     public: {
       supabaseUrl: process.env.SUPABASE_URL,
@@ -34,3 +40,4 @@ export default defineNuxtConfig({
     }
   }
 });
+

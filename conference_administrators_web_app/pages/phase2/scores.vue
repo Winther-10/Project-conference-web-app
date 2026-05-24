@@ -14,9 +14,21 @@ const loading = ref(true);
 const announcing = ref(null);
 const sortKey = ref('avg_score');
 const sortDir = ref('desc');
+const filterYear = ref('all');
+const activeAcademicYear = ref(null);
+
+const fetchSettings = async () => {
+  const { data } = await supabase.from('system_settings').select('config_json').single();
+  if (data?.config_json?.conference) {
+    const conf = data.config_json.conference;
+    activeAcademicYear.value = conf.academicYear || conf.year || new Date().getFullYear();
+    if (filterYear.value === 'all') filterYear.value = String(activeAcademicYear.value);
+  }
+};
 
 const loadData = async () => {
   loading.value = true;
+  await fetchSettings();
   try {
     // Fetch papers that are accepted and have at least one Phase 2 score
     const { data: papersData } = await supabase
@@ -88,13 +100,43 @@ const loadData = async () => {
 };
 
 const sortedPapers = computed(() => {
-  const arr = [...papers.value];
+  let arr = [...papers.value];
+  
+  // Filter by year
+  if (filterYear.value !== 'all') {
+    arr = arr.filter(p => {
+      // Use paper_code prefix (e.g., CS-26) or created_at if available
+      if (p.paper_code) {
+        const match = p.paper_code.match(/-(\d{2})/);
+        if (match) {
+          const yearPrefix = match[1];
+          return yearPrefix === filterYear.value.slice(-2);
+        }
+      }
+      return true;
+    });
+  }
+
   arr.sort((a, b) => {
     const av = a[sortKey.value] ?? 0;
     const bv = b[sortKey.value] ?? 0;
     return sortDir.value === 'desc' ? bv - av : av - bv;
   });
   return arr;
+});
+
+const yearOptions = computed(() => {
+  const years = new Set();
+  if (activeAcademicYear.value) years.add(String(activeAcademicYear.value));
+  papers.value.forEach(p => {
+    if (p.paper_code) {
+      const match = p.paper_code.match(/-(\d{2})/);
+      if (match) {
+        years.add('20' + match[1]);
+      }
+    }
+  });
+  return Array.from(years).sort((a, b) => b - a);
 });
 
 const toggleSort = (key) => {
@@ -184,10 +226,16 @@ onMounted(loadData);
         </h2>
         <p class="text-sm text-slate-500 mt-1 font-en">คะแนนจากกรรมการทุกท่าน — Admin เท่านั้นที่เห็นข้อมูลนี้</p>
       </div>
-      <button @click="loadData" class="flex items-center gap-2 text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-4 py-2.5 rounded-xl transition-all">
-        <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
-        รีเฟรช
-      </button>
+      <div class="flex items-center gap-3">
+        <select v-model="filterYear" class="h-10 px-4 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 focus:outline-none">
+          <option value="all">ทุกปีการศึกษา</option>
+          <option v-for="y in yearOptions" :key="y" :value="y">ปี {{ y }}</option>
+        </select>
+        <button @click="loadData" class="flex items-center gap-2 text-xs font-bold text-amber-600 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-4 py-2.5 rounded-xl transition-all">
+          <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
+          รีเฟรช
+        </button>
+      </div>
     </div>
 
     <!-- Loading -->

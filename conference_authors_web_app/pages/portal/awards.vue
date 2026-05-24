@@ -10,7 +10,6 @@ import { useSupabase } from '~/composables/useSupabase';
 const { userProfile } = useAuth();
 const supabase = useSupabase();
 
-const profile = ref('researcher');
 const awardType = ref('poster');
 const annualQuery = ref('');
 const openCertificate = ref(null);
@@ -18,6 +17,7 @@ const openAnnual = ref(null);
 const isLoading = ref(true);
 const myCertificates = ref([]);
 const annualAwards = ref([]);
+const finalistCount = ref(20);
 
 const conferenceInfo = ref({
   theme: 'BRICC Festival',
@@ -26,17 +26,21 @@ const conferenceInfo = ref({
 });
 
 const annualLevelTheme = {
-  gold: { label: 'ชนะเลิศ', gradient: 'from-amber-400 to-amber-500', softBg: 'bg-amber-50', softBorder: 'border-amber-100', softText: 'text-amber-700', badge: 'bg-amber-50 border-amber-200 text-amber-700' },
-  silver: { label: 'รองชนะเลิศอันดับ 1', gradient: 'from-slate-300 to-slate-400', softBg: 'bg-slate-50', softBorder: 'border-slate-100', softText: 'text-slate-700', badge: 'bg-slate-50 border-slate-200 text-slate-700' },
-  bronze: { label: 'รองชนะเลิศอันดับ 2', gradient: 'from-orange-300 to-orange-400', softBg: 'bg-orange-50', softBorder: 'border-orange-100', softText: 'text-orange-700', badge: 'bg-orange-50 border-orange-200 text-orange-700' },
-  qualified: { label: 'ผ่านการนำเสนอ', gradient: 'from-blue-300 to-indigo-400', softBg: 'bg-blue-50', softBorder: 'border-blue-100', softText: 'text-blue-700', badge: 'bg-blue-50 border-blue-200 text-blue-700' }
+  champion: { label: 'ชนะเลิศ', gradient: 'from-amber-400 to-amber-600', softBg: 'bg-amber-50', softBorder: 'border-amber-200', softText: 'text-amber-800', badge: 'bg-amber-100 border-amber-300 text-amber-800' },
+  runner_up_1: { label: 'รองชนะเลิศอันดับ 1', gradient: 'from-slate-350 to-slate-500', softBg: 'bg-slate-50', softBorder: 'border-slate-250', softText: 'text-slate-800', badge: 'bg-slate-100 border-slate-300 text-slate-850' },
+  runner_up_2: { label: 'รองชนะเลิศอันดับ 2', gradient: 'from-orange-450 to-orange-600', softBg: 'bg-orange-50', softBorder: 'border-orange-255', softText: 'text-orange-900', badge: 'bg-orange-100 border-orange-300 text-orange-850' },
+  honorable_mention: { label: 'ชมเชย', gradient: 'from-sky-400 to-indigo-500', softBg: 'bg-sky-50', softBorder: 'border-sky-200', softText: 'text-sky-850', badge: 'bg-sky-100 border-sky-300 text-sky-800' },
+  finalist: { label: 'ผ่านเข้ารอบ', gradient: 'from-teal-400 to-emerald-500', softBg: 'bg-teal-50', softBorder: 'border-teal-250', softText: 'text-teal-850', badge: 'bg-teal-100 border-teal-300 text-teal-850' },
+  participant: { label: 'เข้าร่วม', gradient: 'from-slate-200 to-slate-350', softBg: 'bg-slate-50', softBorder: 'border-slate-200', softText: 'text-slate-600', badge: 'bg-slate-100 border-slate-200 text-slate-600' }
 };
 
 const levelMeta = {
-  gold: { title: 'รางวัลชนะเลิศ', pill: 'bg-amber-50 border-amber-100 text-amber-700', accent: 'border-amber-100' },
-  silver: { title: 'รางวัลรองชนะเลิศอันดับ 1', pill: 'bg-slate-50 border-slate-100 text-slate-700', accent: 'border-slate-100' },
-  bronze: { title: 'รางวัลรองชนะเลิศอันดับ 2', pill: 'bg-orange-50 border-orange-100 text-orange-700', accent: 'border-orange-100' },
-  qualified: { title: 'รายชื่อบทความที่ผ่านการนำเสนอ (อันดับ 4-20)', pill: 'bg-blue-50 border-blue-100 text-blue-700', accent: 'border-blue-100' }
+  champion: { title: 'รางวัลชนะเลิศ จำนวน 1 รางวัล  ได้รับโล่พระราชทานสมเด็จพระกนิษฐาธิราชเจ้า กรมสมเด็จ พระเทพรัตนราชสุดาฯ สยามบรมราชกุมารี พร้อมเกียรติบัตรและเงินรางวัลจํานวน 5,000 บาท', pill: 'bg-amber-50 border-amber-200 text-amber-700', accent: 'border-amber-200' },
+  runner_up_1: { title: 'รางวัลรองชนะเลิศอันดับ 1 จำนวน 1 รางวัล ได้รับเกียรติบัตรพร้อมเงินรางวัลจํานวน 4,000 บาท', pill: 'bg-slate-50 border-slate-300 text-slate-700', accent: 'border-slate-300' },
+  runner_up_2: { title: 'รางวัลรองชนะเลิศอันดับ 2 จำนวน 1 รางวัล ได้รับเกียรติบัตรพร้อมเงินรางวัลจํานวน 3,000 บาท', pill: 'bg-orange-50 border-orange-200 text-orange-700', accent: 'border-orange-200' },
+  honorable_mention: { title: 'รางวัลชมเชย จำนวน 1 รางวัล ได้รับเกียรติบัตรพร้อมเงินรางวัลจํานวน 1,000 บาท', pill: 'bg-sky-50 border-sky-200 text-sky-700', accent: 'border-sky-250' },
+  finalist: { title: 'ผ่านเข้ารอบ (Finalist)', pill: 'bg-teal-50 border-teal-200 text-teal-700', accent: 'border-teal-200' },
+  participant: { title: 'เข้าร่วม (Participant)', pill: 'bg-slate-50 border-slate-200 text-slate-500', accent: 'border-slate-200' }
 };
 
 const awardTabs = [
@@ -64,101 +68,216 @@ onUnmounted(() => {
 const fetchData = async () => {
   isLoading.value = true;
   try {
-    // Fetch System Settings
+    // 1. Fetch System Settings
     const { data: sysData } = await supabase.from('system_settings').select('*').eq('id', 1).single();
     if (sysData?.config_json?.conference) {
       const conf = sysData.config_json.conference;
       conferenceInfo.value = {
-        theme: conf.theme || 'BRICC Festival',
-        subtitle: conf.subtitle || 'The 10th Buriram Rajabhat Conference',
+        theme: conf.theme || conf.name || 'BRICC Festival',
+        subtitle: conf.subtitle || 'The 9th Buriram Rajabhat Conference',
         year: conf.year || '2026'
       };
+      finalistCount.value = conf.finalistCount || 20;
     }
 
-    // 1. Fetch user's papers to know which awards belong to them
-    const { data: myPapers } = await supabase.from('papers').select('paper_id, paper_code').eq('author_id', userProfile.value?.user_id);
-    const myPaperIds = myPapers?.map(p => p.paper_id) || [];
+    // 2. Fetch all accepted/published papers to determine ranks dynamically
+    const { data: papersData } = await supabase.from('papers').select(`
+      paper_id, paper_code, title_th, title_en, track, author_id, authors, abstract, status,
+      review_assignments (
+        phase2_total_score, phase2_completed_at
+      )
+    `);
 
-    // 2. Fetch public annual awards
-    const { data: publicAwards } = await supabase.from('awards').select('*').order('phase2_avg_score', { ascending: false });
-    
-    if (publicAwards) {
-      annualAwards.value = publicAwards.map(a => {
-        let rawLevel = a.award_type || a.level || 'qualified';
-        let mappedLevel = rawLevel.toLowerCase();
-        if (mappedLevel === 'excellent' || mappedLevel.includes('ชนะเลิศ')) mappedLevel = 'gold';
-        if (mappedLevel === 'distinguished' || mappedLevel.includes('อันดับ 1')) mappedLevel = 'silver';
-        if (mappedLevel === 'good' || mappedLevel.includes('อันดับ 2')) mappedLevel = 'bronze';
-
+    const ranked = (papersData || [])
+      .map(p => {
+        const phase2 = (p.review_assignments || []).filter(a => a.phase2_completed_at);
+        const avg = phase2.length > 0
+          ? phase2.reduce((s, a) => s + (a.phase2_total_score || 0), 0) / phase2.length : 0;
         return {
-          ...a,
-          id: a.id,
-          type: a.type || 'poster',
-          level: mappedLevel,
-          score: a.phase2_avg_score || 0,
-          articleId: a.paper_code || a.article_id || '-',
-          title: a.title_th || a.title || '-',
-          uni: a.university || '-',
-          track: a.track || '-',
-          authors: a.authors || []
+          ...p,
+          avg_score: Math.round(avg * 10) / 10,
+          completed: phase2.length
+        };
+      })
+      .filter(p => p.completed > 0 || ['rejected', 'revision_required', 'format_error'].includes(p.status))
+      .sort((a, b) => b.avg_score - a.avg_score);
+
+    // 3. Find papers related to current user
+    const myEmail = userProfile.value?.email || '';
+    const myFirstName = userProfile.value?.first_name_th || '';
+    const myLastName = userProfile.value?.last_name_th || '';
+    
+    // Fetch papers where user is author_id
+    const myPapers = (papersData || []).filter(p => p.author_id === userProfile.value?.user_id);
+    const myPaperCodes = myPapers.map(p => p.paper_code).filter(Boolean);
+
+    // Fetch relations from paper_authors
+    let paperAuthorsQuery = supabase.from('paper_authors').select('*');
+    if (myEmail) {
+      paperAuthorsQuery = paperAuthorsQuery.or(`email.eq.${myEmail},and(first_name.eq.${myFirstName},last_name.eq.${myLastName})`);
+    } else {
+      paperAuthorsQuery = paperAuthorsQuery.and(`first_name.eq.${myFirstName},last_name.eq.${myLastName}`);
+    }
+    const { data: myAuthorRelations } = await paperAuthorsQuery;
+    
+    // Collect all related paper codes
+    const relatedPaperCodes = new Set([
+      ...myPaperCodes,
+      ...(myAuthorRelations?.map(r => r.paper_code).filter(Boolean) || [])
+    ]);
+
+    const myRelatedPapers = (papersData || []).filter(p => relatedPaperCodes.has(p.paper_code));
+
+    // 4. Fetch list of saved certificate files in storage
+    const { data: storageFiles } = await supabase.storage.from('certificates').list();
+    const savedFiles = new Set(storageFiles?.map(f => f.name) || []);
+
+    // 5. Fetch all paper_authors for annual awards listing
+    const { data: authorsRes } = await supabase.from('paper_authors').select('*');
+    const paperAuthorsMap = (authorsRes || []).reduce((acc, a) => {
+      if (!acc[a.paper_code]) acc[a.paper_code] = [];
+      const name = `${a.prefix || ''}${a.first_name || ''} ${a.last_name || ''}`.trim();
+      const role = a.member_type === 'advisor' ? 'อาจารย์ที่ปรึกษา' : (a.role || 'ผู้แต่งบทความ');
+      acc[a.paper_code].push({
+        name,
+        role,
+        member_type: a.member_type,
+        display_order: a.display_order || 0
+      });
+      return acc;
+    }, {});
+
+    // Sort authors by display_order
+    for (const code of Object.keys(paperAuthorsMap)) {
+      paperAuthorsMap[code].sort((a, b) => {
+        if (a.member_type !== b.member_type) {
+          return a.member_type === 'author' ? -1 : 1;
+        }
+        return a.display_order - b.display_order;
+      });
+    }
+
+    const getPaperUniversity = (paperCode) => {
+      const members = paperAuthorsMap[paperCode] || [];
+      const primaryAuthor = members.find(m => m.member_type === 'author') || members[0];
+      return primaryAuthor?.institution || '-';
+    };
+
+    // 6. Fetch public annual awards to display official trophies/medals
+    const { data: publicAwards } = await supabase.from('awards').select('*');
+    const awardsMap = (publicAwards || []).reduce((acc, a) => {
+      acc[a.paper_code] = a;
+      acc[a.paper_id] = a;
+      return acc;
+    }, {});
+
+    const finalistPapers = ranked
+      .filter(p => !['rejected', 'revision_required', 'format_error'].includes(p.status))
+      .slice(0, finalistCount.value);
+    const finalistIds = new Set(finalistPapers.map(p => p.paper_id));
+    const finalistPaperCodes = new Set(finalistPapers.map(p => p.paper_code));
+
+    if (publicAwards) {
+      annualAwards.value = ranked.map((p) => {
+        const award = awardsMap[p.paper_id];
+        let level = 'participant';
+        if (award) {
+          level = award.award_type || award.level || 'participant';
+          if (level === 'excellent') level = 'champion';
+          if (level === 'distinguished') level = 'runner_up_1';
+          if (level === 'good') level = 'runner_up_2';
+        } else if (finalistIds.has(p.paper_id)) {
+          level = 'finalist';
+        }
+        
+        return {
+          id: p.paper_id,
+          type: 'poster',
+          level: level,
+          score: p.avg_score,
+          articleId: p.paper_code || '-',
+          title: p.title_th || p.title_en || '-',
+          uni: getPaperUniversity(p.paper_code) || p.university || '-',
+          track: p.track || '-',
+          authors: paperAuthorsMap[p.paper_code] || p.authors || [],
+          prize_money: award?.prize_money || 0,
+          prize_description: award?.prize_description || ''
         };
       });
+    }
 
-      // 3. Match my awards and participation certs
-      const certs = [];
-      const myFullName = `${userProfile.value?.first_name_th} ${userProfile.value?.last_name_th}`.trim();
+    // 7. Build myCertificates list
+    const certs = [];
+    for (const paper of myRelatedPapers) {
+      const isFinalist = finalistPaperCodes.has(paper.paper_code);
+      const status = isFinalist ? 'finalist' : 'participant';
+      
+      const authorFile = `cert_author_${status}_${paper.paper_code}.pdf`;
+      const advisorFile = `cert_advisor_${status}_${paper.paper_code}.pdf`;
 
-      // Filter public awards to find those related to me
-      const myRelatedAwards = publicAwards.filter(a => {
-        const isAuthor = myPaperIds.includes(a.paper_id);
-        const isCoAuthor = a.authors?.some(name => name && name.trim().includes(myFullName));
-        return isAuthor || isCoAuthor;
-      });
-
-      myRelatedAwards.forEach(a => {
-        let rawLevel = a.award_type || a.level || 'qualified';
-        let mappedLevel = rawLevel.toLowerCase();
-        if (mappedLevel === 'excellent' || mappedLevel.includes('ชนะเลิศ')) mappedLevel = 'gold';
-        if (mappedLevel === 'distinguished' || mappedLevel.includes('อันดับ 1')) mappedLevel = 'silver';
-        if (mappedLevel === 'good' || mappedLevel.includes('อันดับ 2')) mappedLevel = 'bronze';
-
-        const isAward = ['gold', 'silver', 'bronze'].includes(mappedLevel);
+      // Check author cert
+      if (savedFiles.has(authorFile)) {
+        const { data: { publicUrl } } = supabase.storage.from('certificates').getPublicUrl(authorFile);
+        const awardEntry = awardsMap[paper.paper_code];
+        let category = isFinalist ? 'ผู้แต่ง - ผ่านเข้ารอบ (Finalist)' : 'ผู้แต่ง - เข้าร่วม (Participant)';
+        let title = isFinalist ? 'เกียรติบัตรผู้เสนอผลงาน (ผ่านเข้ารอบ)' : 'เกียรติบัตรผู้เสนอผลงาน (เข้าร่วม)';
         
-        // 1. Add Award Certificate if exists
-        if (isAward && a.certificate_url) {
-          certs.push({
-            id: `award-${a.id}`,
-            kind: 'award',
-            awardName: annualLevelTheme[mappedLevel]?.label ? `${annualLevelTheme[mappedLevel].label} Paper` : 'Award Certificate',
-            level: mappedLevel,
-            ref: a.paper_code || '-',
-            issuedAt: a.announced_at ? a.announced_at.split('T')[0] : new Date().toISOString().split('T')[0],
-            category: 'รางวัลบทความ',
-            url: a.certificate_url
-          });
-        }
-
-        // 2. Add Participation Certificate if saved to cloud
-        // We use a convention: if award entry exists, they ARE qualified for participation
-        // But we only show it if the admin has saved the participant cert
-        const partFileName = `cert_participant_${a.paper_code}.pdf`;
-        const { data: { publicUrl } } = supabase.storage.from('certificates').getPublicUrl(partFileName);
-        
-        // Note: Currently we don't have a separate DB column for participant URL, 
-        // so we show it if the award entry exists (meaning they are announced).
         certs.push({
-          id: `part-${a.id}`,
-          kind: 'participation',
-          awardName: 'Participation Certificate',
-          level: 'qualified',
-          ref: a.paper_code || '-',
-          issuedAt: a.announced_at ? a.announced_at.split('T')[0] : new Date().toISOString().split('T')[0],
-          category: 'ผู้เข้าร่วม',
+          id: `author-${paper.paper_code}`,
+          kind: 'author',
+          awardName: title,
+          level: isFinalist ? 'finalist' : 'participant',
+          ref: paper.paper_code,
+          issuedAt: awardEntry?.announced_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+          category: category,
           url: publicUrl
         });
-      });
-      myCertificates.value = certs;
+      }
+
+      // Check advisor cert
+      if (savedFiles.has(advisorFile)) {
+        const { data: { publicUrl } } = supabase.storage.from('certificates').getPublicUrl(advisorFile);
+        const awardEntry = awardsMap[paper.paper_code];
+        let category = isFinalist ? 'ที่ปรึกษา - ผ่านเข้ารอบ (Finalist)' : 'ที่ปรึกษา - เข้าร่วม (Participant)';
+        let title = isFinalist ? 'เกียรติบัตรอาจารย์ที่ปรึกษา (ผ่านเข้ารอบ)' : 'เกียรติบัตรอาจารย์ที่ปรึกษา (เข้าร่วม)';
+        
+        certs.push({
+          id: `advisor-${paper.paper_code}`,
+          kind: 'advisor',
+          awardName: title,
+          level: isFinalist ? 'finalist' : 'participant',
+          ref: paper.paper_code,
+          issuedAt: awardEntry?.announced_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+          category: category,
+          url: publicUrl
+        });
+      }
+
+      // If they won an award, display the award certificate if available
+      const awardEntry = awardsMap[paper.paper_code];
+      if (awardEntry && awardEntry.certificate_url) {
+        let rawLevel = awardEntry.award_type || awardEntry.level || 'participant';
+        let mappedLevel = rawLevel.toLowerCase();
+        if (mappedLevel === 'excellent' || mappedLevel.includes('ชนะเลิศ') || mappedLevel === 'champion') mappedLevel = 'champion';
+        if (mappedLevel === 'distinguished' || mappedLevel.includes('อันดับ 1') || mappedLevel === 'runner_up_1') mappedLevel = 'runner_up_1';
+        if (mappedLevel === 'good' || mappedLevel.includes('อันดับ 2') || mappedLevel === 'runner_up_2') mappedLevel = 'runner_up_2';
+        if (mappedLevel === 'honorable_mention' || mappedLevel.includes('ชมเชย')) mappedLevel = 'honorable_mention';
+
+        certs.push({
+          id: `award-${paper.paper_code}`,
+          kind: 'award',
+          awardName: `เกียรติบัตรรางวัล${annualLevelTheme[mappedLevel]?.label || ''}`,
+          level: mappedLevel,
+          ref: paper.paper_code,
+          issuedAt: awardEntry.announced_at ? awardEntry.announced_at.split('T')[0] : new Date().toISOString().split('T')[0],
+          category: 'รางวัลบทความ',
+          url: awardEntry.certificate_url
+        });
+      }
     }
+    
+    myCertificates.value = certs;
+
   } catch (error) {
     console.error(error);
   } finally {
@@ -175,15 +294,17 @@ const groupedAnnual = computed(() => {
       return `${x.articleId} ${x.title} ${x.uni}`.toLowerCase().includes(q);
     });
   return {
-    gold: filtered.filter((x) => x.level === 'gold'),
-    silver: filtered.filter((x) => x.level === 'silver'),
-    bronze: filtered.filter((x) => x.level === 'bronze'),
-    qualified: filtered.filter((x) => !['gold', 'silver', 'bronze'].includes(x.level))
+    champion: filtered.filter((x) => x.level === 'champion'),
+    runner_up_1: filtered.filter((x) => x.level === 'runner_up_1'),
+    runner_up_2: filtered.filter((x) => x.level === 'runner_up_2'),
+    honorable_mention: filtered.filter((x) => x.level === 'honorable_mention'),
+    finalist: filtered.filter((x) => x.level === 'finalist'),
+    participant: filtered.filter((x) => x.level === 'participant')
   };
 });
 
 const myAwardCerts = computed(() => myCertificates.value.filter(c => c.kind === 'award'));
-const myParticipationCerts = computed(() => myCertificates.value.filter(c => c.kind === 'participation'));
+const myParticipationCerts = computed(() => myCertificates.value.filter(c => c.kind === 'author' || c.kind === 'advisor'));
 
 const downloadBlob = (filename, mime, content) => {
   const blob = new Blob([content], { type: mime });
@@ -275,27 +396,6 @@ const makeCertificateSvg = ({ accent = '#F59E0B', title, subtitle, name, awardNa
               <div class="text-[13px] font-bold text-slate-500 mt-0.5 truncate">{{ conferenceInfo.subtitle }} ในงาน {{ conferenceInfo.theme }} {{ conferenceInfo.year }}</div>
             </div>
           </div>
-
-          <div class="flex items-center gap-3 flex-shrink-0 bg-slate-100/50 p-1 rounded-[18px] border border-slate-200">
-            <button
-              @click="profile = 'undergrad'"
-              :class="[
-                'h-10 px-5 rounded-2xl text-[13px] font-black inline-flex items-center gap-2 transition-all duration-300',
-                profile === 'undergrad' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              ]"
-            >
-              <GraduationCap class="w-4 h-4" /> ป.ตรี
-            </button>
-            <button
-              @click="profile = 'researcher'"
-              :class="[
-                'h-10 px-5 rounded-2xl text-[13px] font-black inline-flex items-center gap-2 transition-all duration-300',
-                profile === 'researcher' ? 'bg-white text-amber-600 shadow-sm border border-slate-200/50' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-              ]"
-            >
-              <User class="w-4 h-4" /> นักวิจัย
-            </button>
-          </div>
         </div>
       </div>
     </div>
@@ -324,7 +424,7 @@ const makeCertificateSvg = ({ accent = '#F59E0B', title, subtitle, name, awardNa
                       <div :class="['px-2.5 py-0.5 rounded-full text-white text-[10px] font-black tracking-widest uppercase border', annualLevelTheme[cert.level]?.gradient ? 'bg-gradient-to-br ' + annualLevelTheme[cert.level].gradient : 'bg-amber-500']">
                         AWARD
                       </div>
-                      <div class="text-[11px] font-black text-slate-400 uppercase tracking-wider font-['Lato']">{{ profile === 'undergrad' ? 'Undergrad' : 'Researcher' }}</div>
+                      <div class="text-[11px] font-black text-slate-400 uppercase tracking-wider font-['Lato']">{{ cert.category }}</div>
                     </div>
                     <div class="mt-3 text-[19px] font-black text-slate-900 leading-tight transition-colors" :class="annualLevelTheme[cert.level]?.softText ? 'group-hover:' + annualLevelTheme[cert.level].softText : 'group-hover:text-amber-700'">{{ cert.awardName }}</div>
                     <div class="mt-2 text-[12px] font-bold text-slate-500 tracking-wider font-['Lato']">REF: {{ cert.ref }}</div>
@@ -395,7 +495,7 @@ const makeCertificateSvg = ({ accent = '#F59E0B', title, subtitle, name, awardNa
           </div>
 
           <div class="space-y-8">
-            <div v-for="g in ['gold', 'silver', 'bronze', 'qualified']" :key="g" class="space-y-3">
+            <div v-for="g in ['champion', 'runner_up_1', 'runner_up_2', 'honorable_mention', 'finalist', 'participant']" :key="g" class="space-y-3">
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <div :class="['w-9 h-9 rounded-2xl border flex items-center justify-center shadow-sm', levelMeta[g].pill]">
@@ -403,8 +503,11 @@ const makeCertificateSvg = ({ accent = '#F59E0B', title, subtitle, name, awardNa
                   </div>
                   <div class="text-xs font-black text-slate-900">{{ levelMeta[g].title }}</div>
                 </div>
-                <div v-if="['gold', 'silver', 'bronze'].includes(g)" class="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-lg border border-amber-100">
-                  รับเกียรติบัตร 2 ฉบับ
+                <div v-if="['champion', 'runner_up_1', 'runner_up_2', 'honorable_mention'].includes(g)" class="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-lg border border-amber-100">
+                  รับเกียรติบัตรรางวัล
+                </div>
+                <div v-else-if="g === 'finalist'" class="text-[10px] font-bold text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded-lg border border-teal-100">
+                  รับเกียรติบัตรผ่านเข้ารอบ
                 </div>
                 <div v-else class="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-lg border border-blue-100">
                   รับเกียรติบัตรเข้าร่วม
@@ -532,46 +635,74 @@ const makeCertificateSvg = ({ accent = '#F59E0B', title, subtitle, name, awardNa
         </div>
 
         <!-- Annual Award Modal -->
-        <div v-if="openAnnual" class="rounded-3xl bg-white overflow-hidden shadow-xl">
-          <div class="px-5 py-4 flex items-center justify-between gap-3 border-b border-slate-200">
-            <div class="text-sm font-black text-slate-900 truncate">รายละเอียดรางวัล</div>
-            <button @click="closeAllModals" class="h-9 px-3 rounded-2xl bg-slate-900 text-white hover:bg-slate-800 transition-colors text-xs font-black">ปิด</button>
+        <div v-if="openAnnual" class="rounded-[32px] bg-white overflow-hidden shadow-2xl ring-1 ring-slate-100">
+          <div class="px-6 py-5 flex items-center justify-between gap-3 border-b border-slate-100">
+            <div class="text-sm font-black text-slate-800 tracking-wide">รายละเอียดรางวัล</div>
+            <button @click="closeAllModals" class="h-9 px-4 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all text-[11px] font-black uppercase tracking-widest">ปิดหน้าต่าง</button>
           </div>
 
-          <div class="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
-            <div :class="['rounded-3xl bg-gradient-to-br text-white p-5', annualLevelTheme[openAnnual.level]?.gradient || 'from-amber-500 to-orange-500']">
-              <div class="inline-flex items-center gap-2">
-                <div class="px-3 py-1 rounded-full bg-white/15 border border-white/25 text-[10px] font-black">
-                  {{ (annualLevelTheme[openAnnual.level]?.label || openAnnual.level).toUpperCase() }} {{ openAnnual.type.toUpperCase() }}
+          <div class="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+            <!-- Main Info Card (Minimal Light) -->
+            <div :class="['rounded-[24px] border p-6 transition-colors', annualLevelTheme[openAnnual.level]?.softBg || 'bg-slate-50', annualLevelTheme[openAnnual.level]?.softBorder || 'border-slate-200']">
+              <div class="flex items-center justify-between gap-4 mb-4">
+                <div :class="['px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest', annualLevelTheme[openAnnual.level]?.badge || 'bg-slate-100 border-slate-200 text-slate-600']">
+                  {{ (annualLevelTheme[openAnnual.level]?.label || openAnnual.level).toUpperCase() }}
                 </div>
-                <div class="text-[10px] font-black text-white/90">{{ openAnnual.articleId }}</div>
+                <div class="text-[11px] font-black text-slate-400 bg-white/60 px-3 py-1 rounded-full border border-white/50">{{ openAnnual.articleId }}</div>
               </div>
-              <div class="mt-3 text-lg font-black leading-snug">“ {{ openAnnual.title }} ”</div>
-              <div class="mt-3 flex items-center gap-4">
-                <div class="bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/30 text-xs font-black">คะแนนเฉลี่ย: {{ openAnnual.score }}</div>
-                <div class="text-xs font-semibold text-white/90">สาขา: {{ openAnnual.track || '-' }} </div>
+              
+              <div :class="['text-xl md:text-2xl font-black leading-tight mb-4', annualLevelTheme[openAnnual.level]?.softText || 'text-slate-800']">
+                {{ openAnnual.title }}
               </div>
-              <div class="mt-2 text-xs font-semibold text-white/80">สถาบัน: {{ openAnnual.uni }}</div>
+              
+              <div class="grid grid-cols-2 gap-3 mb-4">
+                <div class="bg-white/60 backdrop-blur-sm rounded-2xl p-3 border border-white/50">
+                  <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">สาขา / Track</div>
+                  <div class="text-xs font-black text-slate-800">{{ openAnnual.track || '-' }}</div>
+                </div>
+                <div class="bg-white/60 backdrop-blur-sm rounded-2xl p-3 border border-white/50">
+                  <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">คะแนนเฉลี่ย</div>
+                  <div class="text-xs font-black text-slate-800 flex items-center gap-1"><Trophy class="w-3.5 h-3.5 text-amber-500" /> {{ openAnnual.score }} / 100</div>
+                </div>
+              </div>
+
+              <div class="bg-white/60 backdrop-blur-sm rounded-2xl p-3 border border-white/50 flex items-start gap-3">
+                <GraduationCap class="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+                <div>
+                  <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">สถาบัน</div>
+                  <div class="text-xs font-bold text-slate-700 leading-relaxed">{{ openAnnual.uni }}</div>
+                </div>
+              </div>
             </div>
 
-            <div v-if="openAnnual.authors && openAnnual.authors.length > 0" class="rounded-3xl border border-slate-200 bg-white p-4">
-              <div class="text-xs font-black text-slate-900">ทีมวิจัย/ผู้นำเสนอ</div>
-              <div class="mt-3 space-y-2">
-                <div v-for="(a, idx) in openAnnual.authors" :key="idx" class="rounded-2xl bg-slate-50 border border-slate-200 p-3 flex items-center gap-3">
-                  <div class="w-7 h-7 rounded-full bg-slate-200 text-slate-700 text-xs font-black flex items-center justify-center flex-shrink-0">{{ idx + 1 }}</div>
+            <!-- Additional Prize Info (If available) -->
+            <div v-if="openAnnual.prize_description" class="rounded-[24px] border border-amber-100 bg-gradient-to-br from-amber-50/50 to-orange-50/30 p-5">
+              <div class="flex items-start gap-4">
+                <div class="w-12 h-12 rounded-[18px] bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                  <Award class="w-6 h-6" />
+                </div>
+                <div>
+                  <div class="text-xs font-black text-amber-800 mb-1">รางวัลที่ได้รับ</div>
+                  <div class="text-[13px] font-bold text-amber-700/80 leading-relaxed">{{ openAnnual.prize_description }}</div>
+                  <div v-if="openAnnual.prize_money > 0" class="mt-2 text-sm font-black text-amber-600">เงินรางวัล {{ openAnnual.prize_money.toLocaleString() }} บาท</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Authors list -->
+            <div v-if="openAnnual.authors && openAnnual.authors.length > 0" class="space-y-3">
+              <div class="text-xs font-black text-slate-800 px-1 uppercase tracking-widest">ทีมวิจัย / ผู้นำเสนอ</div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div v-for="(a, idx) in openAnnual.authors" :key="idx" class="rounded-[20px] bg-slate-50 border border-slate-100 p-3 flex items-center gap-3 hover:bg-slate-100/50 hover:border-slate-200 transition-colors">
+                  <div class="w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 text-xs font-black flex items-center justify-center shrink-0 shadow-sm">{{ idx + 1 }}</div>
                   <div class="min-w-0">
-                    <div class="text-xs font-black text-slate-900 truncate">{{ a.name || a }}</div>
-                    <div class="text-[11px] font-semibold text-slate-500 truncate">{{ a.role || 'Author' }}</div>
+                    <div class="text-[13px] font-black text-slate-800 truncate">{{ a.name || a }}</div>
+                    <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">{{ a.role || 'Author' }}</div>
                   </div>
                 </div>
               </div>
             </div>
-
-            <div class="grid grid-cols-1 gap-3">
-              <button @click="closeAllModals" class="h-11 rounded-2xl bg-white border border-slate-200 text-slate-900 text-sm font-black hover:bg-slate-50 transition-colors">
-                กลับไปดูรายการ
-              </button>
-            </div>
+            
           </div>
         </div>
       </div>

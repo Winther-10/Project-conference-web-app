@@ -5,10 +5,12 @@ import { useRouter } from 'vue-router';
 import { Bell, CheckCircle2, Clock, FileText, Megaphone, X } from 'lucide-vue-next';
 import { useAuth } from '~/composables/useAuth';
 import { useSupabase } from '~/composables/useSupabase';
+import { useNotifications } from '~/composables/useNotifications';
 
 const router = useRouter();
 const { userProfile } = useAuth();
 const supabase = useSupabase();
+const { createNotification, notifications, fetchNotifications } = useNotifications();
 
 const papers = ref([]);
 const recentNews = ref([]);
@@ -17,6 +19,7 @@ const isLoading = ref(true);
 // Conference settings
 const conferenceName = ref('BRICC Festival');
 const confDates = ref({ submissionClose: null, announcementDate: null, conferenceDate: null });
+const activeAcademicYear = ref(null);
 
 // Live countdown state
 const countdown = ref({ days: 0, hours: 0, minutes: 0, seconds: 0 });
@@ -60,37 +63,97 @@ const updateCountdown = () => {
   countdown.value = { days: Math.floor(t / 86400), hours: Math.floor((t % 86400) / 3600), minutes: Math.floor((t % 3600) / 60), seconds: t % 60 };
 };
 
-onMounted(async () => {
-  if (userProfile.value) {
-    const { data } = await supabase.from('papers').select('*').eq('author_id', userProfile.value.user_id).order('created_at', { ascending: false });
-    papers.value = data || [];
-  }
-
-  const [newsRes, settingsRes] = await Promise.all([
-    supabase.from('news').select('*').eq('status', 'published').order('published_at', { ascending: false }).limit(2),
-    supabase.from('system_settings').select('config_json').single()
-  ]);
-
-  recentNews.value = newsRes.data || [];
-
-  if (settingsRes.data?.config_json?.conference) {
-    const conf = settingsRes.data.config_json.conference;
-    if (conf.name) conferenceName.value = conf.name;
-    if (conf.dates) {
-      confDates.value = {
-        submissionClose:  conf.dates.submissionClose  || null,
-        announcementDate: conf.dates.announcementDate || null,
-        conferenceDate:   conf.dates.conferenceDate   || null,
-      };
+const fetchDashboardData = async (showLoader = false) => {
+  if (showLoader) isLoading.value = true;
+  try {
+    if (userProfile.value) {
+      const { data } = await supabase.from('papers').select('*').eq('author_id', userProfile.value.user_id).order('created_at', { ascending: false });
+      papers.value = data || [];
     }
-  }
 
-  updateCountdown();
-  countdownTimer = setInterval(updateCountdown, 1000);
-  isLoading.value = false;
+    const [newsRes, settingsRes] = await Promise.all([
+      supabase.from('news').select('*').eq('status', 'published').order('published_at', { ascending: false }).limit(2),
+      supabase.from('system_settings').select('config_json').maybeSingle()
+    ]);
+
+    recentNews.value = newsRes.data || [];
+
+    if (settingsRes.data?.config_json?.conference) {
+      const conf = settingsRes.data.config_json.conference;
+      if (conf.name) conferenceName.value = conf.name;
+      if (conf.academicYear) activeAcademicYear.value = conf.academicYear;
+      else if (conf.year) activeAcademicYear.value = conf.year;
+      else activeAcademicYear.value = new Date().getFullYear();
+
+      if (conf.dates) {
+        confDates.value = {
+          submissionClose:  conf.dates.submissionClose  || null,
+          announcementDate: conf.dates.announcementDate || null,
+          conferenceDate:   conf.dates.conferenceDate   || null,
+        };
+      }
+    }
+  } catch (error) {
+    console.error('Dashboard Data Fetch Error:', error);
+  } finally {
+    updateCountdown();
+    if (showLoader) isLoading.value = false;
+  }
+};
+
+// --- Tab Resume: refetch when Chrome tab becomes visible again ---
+useTabResume(() => {
+  console.log('[dashboard] Tab resumed — refetching dashboard data');
+  fetchDashboardData(false);
 });
 
-onUnmounted(() => { if (countdownTimer) clearInterval(countdownTimer); });
+onMounted(async () => {
+  await fetchDashboardData(true);
+  
+  countdownTimer = setInterval(updateCountdown, 1000);
+
+
+  // 🔔 เฟส 1: ตรวจสอบและสร้างการแจ้งเตือน "Welcome" ครั้งแรก & "ข้อมูลไม่ครบ"
+  await fetchNotifications();
+  if (userProfile.value) {
+    const hasWelcome = notifications.value.some(n => n.type === 'welcome');
+    if (!hasWelcome) {
+      createNotification({
+        type: 'welcome',
+        phase: 'account',
+        title: 'ยินดีต้อนรับสู่ระบบ ' + conferenceName.value + '!',
+        message: 'กรุณาอัปเดตข้อมูลส่วนตัวและสังกัดของคุณให้สมบูรณ์เพื่อให้ระบบทำงานได้อย่างถูกต้อง',
+        link: '/portal/settings',
+      }).catch(() => {});
+    }
+
+    // ตรวจสอบข้อมูล Profile ครบหรือไม่
+    const profile = userProfile.value;
+    const missingFields = [];
+    if (!profile.first_name_th) missingFields.push('ชื่อ');
+    if (!profile.last_name_th) missingFields.push('นามสกุล');
+    if (!profile.phone) missingFields.push('เบอร์โทรศัพท์');
+    if (!profile.institution) missingFields.push('สังกัด');
+
+    if (missingFields.length > 0) {
+      const hasProfileNotif = notifications.value.some(n => n.type === 'profile_incomplete' && !n.is_read);
+      if (!hasProfileNotif) {
+        createNotification({
+          type: 'profile_incomplete',
+          phase: 'account',
+          title: 'ข้อมูล Profile ยังไม่สมบูรณ์',
+          message: `ข้อมูล Profile ของคุณยังไม่ครบ (${missingFields.join(', ')}) กรุณาอัปเดตเพื่อให้การออกเกียรติบัตรถูกต้อง`,
+          is_urgent: true,
+          link: '/portal/settings',
+        }).catch(() => {});
+      }
+    }
+  }
+});
+
+onUnmounted(() => {
+  if (countdownTimer) clearInterval(countdownTimer);
+});
 
 const padTwo = (n) => String(n).padStart(2, '0');
 
@@ -113,6 +176,12 @@ const getStatusLabel = (status) => {
   const map = { draft: 'ฉบับร่าง', pending: 'รอพิจารณา', pending_review: 'รอพิจารณา', revision: 'รอแก้ไข', accepted: 'ผ่าน', published: 'ตีพิมพ์', rejected: 'ไม่ผ่าน' };
   return map[(status || '').toLowerCase()] || status || 'รอพิจารณา';
 };
+
+const activePapers = computed(() => {
+  if (!activeAcademicYear.value) return papers.value;
+  const yy = String(activeAcademicYear.value).slice(-2);
+  return papers.value.filter(p => p.paper_code && p.paper_code.includes(`-${yy}`));
+});
 </script>
 
 <template>
@@ -206,7 +275,7 @@ const getStatusLabel = (status) => {
           </div>
         </div>
         <div>
-          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ papers.length }}</div>
+          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ activePapers.length }}</div>
           <div class="text-[12px] font-bold text-slate-500 mt-1">บทความทั้งหมด</div>
         </div>
       </div>
@@ -217,7 +286,7 @@ const getStatusLabel = (status) => {
           </div>
         </div>
         <div>
-          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ papers.filter(p => p.status?.toLowerCase().includes('pending')).length }}</div>
+          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ activePapers.filter(p => p.status?.toLowerCase().includes('pending')).length }}</div>
           <div class="text-[12px] font-bold text-slate-500 mt-1">รอพิจารณา</div>
         </div>
       </div>
@@ -228,7 +297,7 @@ const getStatusLabel = (status) => {
           </div>
         </div>
         <div>
-          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ papers.filter(p => p.status?.toLowerCase() === 'accepted').length }}</div>
+          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ activePapers.filter(p => p.status?.toLowerCase() === 'accepted').length }}</div>
           <div class="text-[12px] font-bold text-slate-500 mt-1">ผ่านการพิจารณา</div>
         </div>
       </div>
@@ -239,14 +308,14 @@ const getStatusLabel = (status) => {
           </div>
         </div>
         <div>
-          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ papers.filter(p => p.status?.toLowerCase() === 'rejected').length }}</div>
+          <div class="text-3xl font-black text-slate-900 font-['Lato'] leading-none">{{ activePapers.filter(p => p.status?.toLowerCase() === 'rejected').length }}</div>
           <div class="text-[12px] font-bold text-slate-500 mt-1">ไม่ผ่านพิจารณา</div>
         </div>
       </div>
     </section>
 
     <!-- Recent Papers -->
-    <section class="mb-10" v-if="papers.length > 0">
+    <section class="mb-10" v-if="activePapers.length > 0">
       <div class="bg-white/80 backdrop-blur-lg border border-white rounded-[32px] p-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div class="flex justify-between items-center mb-8">
           <h3 class="font-black text-slate-900 text-xl flex items-center gap-3 tracking-tight">
@@ -260,7 +329,7 @@ const getStatusLabel = (status) => {
           </button>
         </div>
         <div class="space-y-4">
-          <div v-for="paper in papers.slice(0, 3)" :key="paper.id" class="flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-[20px] bg-slate-50/50 border border-slate-100 hover:border-purple-200 hover:bg-white hover:shadow-md transition-all duration-300 gap-4">
+          <div v-for="paper in activePapers.slice(0, 3)" :key="paper.id" class="flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-[20px] bg-slate-50/50 border border-slate-100 hover:border-purple-200 hover:bg-white hover:shadow-md transition-all duration-300 gap-4">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-3 mb-2">
                 <span class="text-[11px] font-black text-slate-400 tracking-widest font-['Lato']">#{{ paper.paper_code || paper.paper_id?.slice(0, 8).toUpperCase() }}</span>

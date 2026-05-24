@@ -60,6 +60,13 @@ const loadData = async () => {
     reviewers.value = reviewersRes.data || [];
     assignments.value = assignmentsRes.data || [];
     allUsers.value = usersRes.data || [];
+    
+    // Default filter to current academic year
+    if (filterYear.value === 'all') {
+      const conf = useState('system_settings').value?.conference;
+      const currentYear = String(conf?.academicYear || conf?.year || new Date().getFullYear());
+      filterYear.value = currentYear;
+    }
   } catch (err) {
     console.error('Error loading data:', err);
   } finally {
@@ -73,10 +80,12 @@ onMounted(loadData);
 const query = ref('');
 const filterCategory = ref('all');
 const filterPaperStatus = ref('all');
+const filterYear = ref('all');
 
 // --- META ---
 const paperStatusMeta = {
   pending_review: { label: 'รอประเมิน', class: 'bg-amber-50 text-amber-800 border-amber-200' },
+  pending_revision: { label: 'รอประเมินแก้ไข', class: 'bg-orange-50 text-orange-800 border-orange-200' },
   reviewing: { label: 'กำลังประเมิน', class: 'bg-sky-50 text-sky-800 border-sky-200' },
   revision_required: { label: 'รอผู้แต่งแก้ไข', class: 'bg-violet-50 text-violet-800 border-violet-200' },
   rejected: { label: 'ปฏิเสธ', class: 'bg-rose-50 text-rose-800 border-rose-200' },
@@ -133,10 +142,18 @@ const reviewerProgressPct = (p) => {
 
 // --- COMPUTED ---
 const stats = computed(() => [
-  { label: 'บทความทั้งหมด', value: papers.value.length, icon: FileText, color: 'text-indigo-600' },
-  { label: 'รอประเมิน', value: papers.value.filter(p => p.status === 'pending_review' || !p.status).length, icon: Clock, color: 'text-amber-600' },
-  { label: 'ยอมรับแล้ว', value: papers.value.filter(p => p.status === 'accepted').length, icon: CheckCircle2, color: 'text-emerald-600' }
+  { label: 'บทความทั้งหมด', value: filteredPapers.value.length, icon: FileText, color: 'text-indigo-600' },
+  { label: 'รอประเมิน', value: filteredPapers.value.filter(p => p.status === 'pending_review' || !p.status).length, icon: Clock, color: 'text-amber-600' },
+  { label: 'ยอมรับแล้ว', value: filteredPapers.value.filter(p => p.status === 'accepted').length, icon: CheckCircle2, color: 'text-emerald-600' }
 ]);
+
+const getEffectiveStatus = (p) => {
+  if (!p) return 'pending_review';
+  if ((p.status === 'pending_review' || !p.status) && p.file_url && p.file_url.includes('|||')) {
+    return 'pending_revision';
+  }
+  return p.status || 'pending_review';
+};
 
 const filteredPapers = computed(() => {
   const q = query.value.trim().toLowerCase();
@@ -144,14 +161,35 @@ const filteredPapers = computed(() => {
     const author = getAuthorName(p.author_id).toLowerCase();
     const matchesQuery = !q || p.paper_code?.toLowerCase().includes(q) || p.title_th?.toLowerCase().includes(q) || p.title_en?.toLowerCase().includes(q) || author.includes(q);
     const matchesCategory = filterCategory.value === 'all' || p.track === filterCategory.value;
-    const matchesPaperStatus = filterPaperStatus.value === 'all' || p.status === filterPaperStatus.value;
-    return matchesQuery && matchesCategory && matchesPaperStatus;
+    
+    // Determine effective status
+    let effectiveStatus = getEffectiveStatus(p);
+    const matchesPaperStatus = filterPaperStatus.value === 'all' || effectiveStatus === filterPaperStatus.value;
+    
+    let matchesYear = true;
+    if (filterYear.value !== 'all') {
+      const year = new Date(p.created_at).getFullYear();
+      // Also check if paper_code contains the year suffix (fallback if needed)
+      matchesYear = String(year) === filterYear.value;
+    }
+
+    return matchesQuery && matchesCategory && matchesPaperStatus && matchesYear;
   });
+});
+
+const yearOptions = computed(() => {
+  const years = new Set();
+  papers.value.forEach(p => {
+    if (p.created_at) {
+      years.add(new Date(p.created_at).getFullYear());
+    }
+  });
+  return Array.from(years).sort((a, b) => b - a);
 });
 
 const categoryStats = computed(() => {
   const counts = {};
-  papers.value.forEach(p => {
+  filteredPapers.value.forEach(p => {
     const track = p.track || 'อื่นๆ';
     counts[track] = (counts[track] || 0) + 1;
   });
@@ -160,11 +198,12 @@ const categoryStats = computed(() => {
 
 const statusCounts = computed(() => {
   return [
-    { label: 'รอประเมิน', value: papers.value.filter(p => p.status === 'pending_review' || !p.status).length, color: '#f59e0b' },
-    { label: 'กำลังประเมิน', value: papers.value.filter(p => p.status === 'reviewing').length, color: '#3b82f6' },
-    { label: 'ยอมรับ', value: papers.value.filter(p => p.status === 'accepted').length, color: '#10b981' },
-    { label: 'ตีพิมพ์แล้ว', value: papers.value.filter(p => p.status === 'published').length, color: '#8b5cf6' },
-    { label: 'ปฏิเสธ', value: papers.value.filter(p => p.status === 'rejected').length, color: '#ef4444' }
+    { label: 'รอประเมิน', value: filteredPapers.value.filter(p => (p.status === 'pending_review' || !p.status) && (!p.file_url || !p.file_url.includes('|||'))).length, color: '#f59e0b' },
+    { label: 'รอประเมินแก้ไข', value: filteredPapers.value.filter(p => (p.status === 'pending_review' || !p.status) && p.file_url && p.file_url.includes('|||')).length, color: '#f97316' },
+    { label: 'กำลังประเมิน', value: filteredPapers.value.filter(p => p.status === 'reviewing').length, color: '#3b82f6' },
+    { label: 'ยอมรับ', value: filteredPapers.value.filter(p => p.status === 'accepted').length, color: '#10b981' },
+    { label: 'ตีพิมพ์แล้ว', value: filteredPapers.value.filter(p => p.status === 'published').length, color: '#8b5cf6' },
+    { label: 'ปฏิเสธ', value: filteredPapers.value.filter(p => p.status === 'rejected').length, color: '#ef4444' }
   ];
 });
 
@@ -281,9 +320,22 @@ const toggleAssignment = async (reviewerId) => {
 const getReviewerWorkload = (reviewerId) => {
   return assignments.value.filter(a => a.reviewer_id === reviewerId && a.status !== 'completed').length;
 };
+
+const downloadFile = (url) => {
+  if (url) {
+    window.open(url, '_blank');
+  }
+};
+
+const getDisplayFileName = (url) => {
+  if (!url) return 'Unknown File';
+  const name = decodeURIComponent(url.split('/').pop() || '');
+  return name.replace(/_\d{10,13}_/, '_');
+};
 </script>
 
 <template>
+  <ClientOnly>
   <div class="p-8 pb-32 font-['Sarabun','Lato'] animate-fade-in" @click="closeRowMenu">
     
     <!-- DETAIL MODAL (Teleported) -->
@@ -308,9 +360,9 @@ const getReviewerWorkload = (reviewerId) => {
             <!-- MAIN INFO CARD -->
             <div class="bg-white rounded-[24px] p-8 border border-slate-200 shadow-sm relative overflow-hidden">
               <div class="absolute top-8 right-8">
-                <span class="px-4 py-1.5 rounded-full text-xs font-black border flex items-center gap-2" :class="paperStatusMeta[selectedPaper.status]?.class || paperStatusMeta.pending_review.class">
+                <span class="px-4 py-1.5 rounded-full text-xs font-black border flex items-center gap-2" :class="paperStatusMeta[getEffectiveStatus(selectedPaper)]?.class || paperStatusMeta.pending_review.class">
                   <span class="w-2 h-2 rounded-full bg-current"></span>
-                  {{ paperStatusMeta[selectedPaper.status]?.label || selectedPaper.status || 'รอประเมิน' }}
+                  {{ paperStatusMeta[getEffectiveStatus(selectedPaper)]?.label || selectedPaper.status || 'รอประเมิน' }}
                 </span>
               </div>
               <div class="max-w-4xl">
@@ -414,19 +466,19 @@ const getReviewerWorkload = (reviewerId) => {
                     <div class="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-slate-100">
                       <div>
                         <div class="text-[10px] font-black text-slate-400 uppercase">สถาบัน</div>
-                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).university || '-' }}</div>
+                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).institution || '-' }}</div>
                       </div>
                       <div>
-                        <div class="text-[10px] font-black text-slate-400 uppercase">คณะ</div>
-                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).faculty || '-' }}</div>
+                        <div class="text-[10px] font-black text-slate-400 uppercase">จังหวัด</div>
+                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).province || '-' }}</div>
                       </div>
                       <div>
                         <div class="text-[10px] font-black text-slate-400 uppercase">เบอร์โทร</div>
-                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).tel || '-' }}</div>
+                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).phone || '-' }}</div>
                       </div>
                       <div>
                         <div class="text-[10px] font-black text-slate-400 uppercase">ตำแหน่ง</div>
-                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).academic_rank || 'ไม่ระบุ' }}</div>
+                        <div class="text-xs font-bold text-slate-700">{{ getAuthorProfile(selectedPaper.author_id).academic_position || 'ไม่ระบุ' }}</div>
                       </div>
                     </div>
                   </div>
@@ -437,16 +489,27 @@ const getReviewerWorkload = (reviewerId) => {
 
                 <section>
                   <h4 class="text-sm font-black text-slate-800 mb-3 uppercase tracking-wider">ไฟล์บทความ</h4>
-                  <div class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex items-center justify-between">
-                    <div class="flex items-center gap-4">
-                      <div class="w-12 h-12 rounded-xl bg-rose-50 flex items-center justify-center text-rose-500">
-                        <FileText class="w-6 h-6" />
+                  <div class="space-y-4">
+                    <!-- Split files into original and revision -->
+                    <template v-if="selectedPaper.file_url">
+                      <div v-for="(roundUrls, roundIdx) in selectedPaper.file_url.split('|||')" :key="roundIdx" class="space-y-2">
+                        <div class="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                          {{ roundIdx === 0 ? 'ไฟล์ส่งครั้งแรก (Original Files)' : 'ไฟล์แก้ไข (Revised Files)' }}
+                        </div>
+                        <div v-for="(url, fileIdx) in roundUrls.split(',')" :key="fileIdx" class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between">
+                          <div class="flex items-center gap-3 min-w-0">
+                            <div class="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-500 shrink-0">
+                              <FileText class="w-5 h-5" />
+                            </div>
+                            <div class="text-[13px] font-black text-slate-800 truncate" :title="getDisplayFileName(url)">{{ getDisplayFileName(url) }}</div>
+                          </div>
+                          <button @click="downloadFile(url)" class="h-9 px-4 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-[11px] font-black flex items-center gap-2 shrink-0 transition-colors">
+                            <Download class="w-4 h-4" /> โหลด
+                          </button>
+                        </div>
                       </div>
-                      <div class="text-sm font-black text-slate-800">Main_Paper.pdf</div>
-                    </div>
-                    <button class="h-10 px-6 rounded-xl bg-slate-900 text-white text-xs font-black flex items-center gap-2">
-                      <Download class="w-4 h-4" /> ดาวน์โหลด
-                    </button>
+                    </template>
+                    <div v-else class="text-sm font-black text-slate-400 italic">ไม่พบไฟล์บทความ</div>
                   </div>
                 </section>
               </div>
@@ -734,6 +797,13 @@ const getReviewerWorkload = (reviewerId) => {
             <option v-for="(v, k) in paperStatusMeta" :key="k" :value="k">{{ v.label }}</option>
           </select>
         </div>
+        <div class="w-full lg:w-32 space-y-1">
+          <label class="text-[11px] font-black text-slate-500 uppercase ml-1">Year</label>
+          <select v-model="filterYear" class="w-full h-11 px-3 rounded-xl bg-slate-50 border border-slate-200 text-sm font-semibold focus:outline-none">
+            <option value="all">All Years</option>
+            <option v-for="y in yearOptions" :key="y" :value="String(y)">{{ y }}</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -779,9 +849,9 @@ const getReviewerWorkload = (reviewerId) => {
                 </div>
               </td>
               <td class="px-6 py-5">
-                <span class="px-3 py-1.5 rounded-full text-[10px] font-black border inline-flex items-center gap-1.5" :class="paperStatusMeta[p.status]?.class || paperStatusMeta.pending_review.class">
+                <span class="px-3 py-1.5 rounded-full text-[10px] font-black border inline-flex items-center gap-1.5" :class="paperStatusMeta[getEffectiveStatus(p)]?.class || paperStatusMeta.pending_review.class">
                   <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
-                  {{ paperStatusMeta[p.status]?.label || p.status || 'รอประเมิน' }}
+                  {{ paperStatusMeta[getEffectiveStatus(p)]?.label || p.status || 'รอประเมิน' }}
                 </span>
               </td>
               <td class="px-6 py-5 text-xs font-bold text-slate-500">{{ formatDateTh(p.created_at) }}</td>
@@ -853,7 +923,7 @@ const getReviewerWorkload = (reviewerId) => {
           <h4 class="text-sm font-black text-slate-800 mb-8 uppercase tracking-widest">สรุปสถานะ</h4>
           <div class="flex items-center gap-12">
             <div class="relative w-40 h-40 rounded-full border-[12px] border-slate-50 flex items-center justify-center">
-               <div class="text-2xl font-black text-slate-800">{{ papers.length }}</div>
+               <div class="text-2xl font-black text-slate-800">{{ filteredPapers.length }}</div>
             </div>
             <div class="flex-1 space-y-4">
               <div v-for="s in statusCounts" :key="s.label" class="flex items-center justify-between">
@@ -882,8 +952,8 @@ const getReviewerWorkload = (reviewerId) => {
         </div>
       </div>
     </div>
-
   </div>
+  </ClientOnly>
 </template>
 
 <style scoped>
