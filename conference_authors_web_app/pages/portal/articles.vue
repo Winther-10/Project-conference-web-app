@@ -268,7 +268,12 @@ const handleAction = async (action, article) => {
     confirmModalOpen.value = true;
   } else if (action === 'download') {
     if (article.file_url) {
-      window.open(article.file_url, '_blank');
+      const allRounds = article.file_url.split('|||');
+      const latestRound = allRounds[allRounds.length - 1];
+      const urls = latestRound.split(',');
+      for (const url of urls) {
+        if (url) downloadFile(url);
+      }
     } else {
       showToast('ไม่พบไฟล์บทความ', 'err');
     }
@@ -376,19 +381,19 @@ const confirmUpload = async () => {
     for (const file of allFiles) {
       // Sanitize the paper code to avoid any special character issues
       const safePrefix = (uploadArticle.value.paper_code || uploadArticle.value.paper_id).replace(/[^a-zA-Z0-9-]/g, '_');
-      const cleanName = file.name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_');
+      const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const fileName = `${safePrefix}_revision_${Date.now()}_${cleanName}`;
       // Use submissions folder to match submit.vue and avoid RLS path restrictions
       const filePath = `submissions/${userProfile.value.user_id}/${fileName}`;
       
       const { error: uploadErr } = await supabase.storage
-        .from('papers')
-        .upload(filePath, file);
-        
+         .from('papers')
+         .upload(filePath, file);
+         
       if (uploadErr) throw uploadErr;
       
       const { data: { publicUrl } } = supabase.storage.from('papers').getPublicUrl(filePath);
-      uploadedUrls.push(publicUrl);
+      uploadedUrls.push(`${publicUrl}?name=${encodeURIComponent(file.name)}`);
     }
     
     const newFileUrlStr = uploadedUrls.join(',');
@@ -458,15 +463,40 @@ const getAuthorName = (article) => {
   return 'ผู้ส่งบทความ';
 };
 
-const downloadFile = (url) => {
-  if (url) {
+const downloadFile = async (url) => {
+  if (!url) return;
+  const displayName = getDisplayFileName(url);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Network response was not ok');
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = displayName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    console.error('Download failed, falling back to window.open:', error);
     window.open(url, '_blank');
   }
 };
 
 const getDisplayFileName = (url) => {
   if (!url) return 'Unknown File';
-  const name = decodeURIComponent(url.split('/').pop() || '');
+  try {
+    const parsedUrl = new URL(url);
+    const nameParam = parsedUrl.searchParams.get('name');
+    if (nameParam) {
+      return decodeURIComponent(nameParam);
+    }
+  } catch (e) {
+    // Ignore URL parsing errors and fallback
+  }
+  const parts = url.split('?')[0].split('/');
+  const name = decodeURIComponent(parts.pop() || '');
   return name.replace(/_\d{10,13}_/, '_');
 };
 </script>

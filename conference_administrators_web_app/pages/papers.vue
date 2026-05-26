@@ -321,16 +321,54 @@ const getReviewerWorkload = (reviewerId) => {
   return assignments.value.filter(a => a.reviewer_id === reviewerId && a.status !== 'completed').length;
 };
 
-const downloadFile = (url) => {
-  if (url) {
+const downloadFile = async (url) => {
+  if (!url) return;
+  const displayName = getDisplayFileName(url);
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Network response was not ok');
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = displayName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (error) {
+    console.error('Download failed, falling back to window.open:', error);
     window.open(url, '_blank');
   }
 };
 
 const getDisplayFileName = (url) => {
   if (!url) return 'Unknown File';
-  const name = decodeURIComponent(url.split('/').pop() || '');
+  try {
+    const parsedUrl = new URL(url);
+    const nameParam = parsedUrl.searchParams.get('name');
+    if (nameParam) {
+      return decodeURIComponent(nameParam);
+    }
+  } catch (e) {
+    // Ignore URL parsing errors and fallback
+  }
+  const parts = url.split('?')[0].split('/');
+  const name = decodeURIComponent(parts.pop() || '');
   return name.replace(/_\d{10,13}_/, '_');
+};
+
+const downloadPaperFiles = (paper) => {
+  if (paper.file_url) {
+    const allRounds = paper.file_url.split('|||');
+    const latestRound = allRounds[allRounds.length - 1];
+    const urls = latestRound.split(',');
+    for (const url of urls) {
+      if (url) downloadFile(url);
+    }
+  } else {
+    alert('ไม่พบไฟล์บทความ');
+  }
 };
 </script>
 
@@ -895,7 +933,7 @@ const getDisplayFileName = (url) => {
                     <button @click="openAssignModal(p)" class="w-full px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl text-left flex items-center gap-4 transition-colors">
                       <UserCheck class="w-4 h-4 text-slate-400" /> กำหนดผู้ทรงคุณวุฒิ
                     </button>
-                    <button class="w-full px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl text-left flex items-center gap-4 transition-colors">
+                    <button @click="downloadPaperFiles(p)" class="w-full px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl text-left flex items-center gap-4 transition-colors">
                       <Download class="w-4 h-4 text-slate-400" /> ดาวน์โหลดไฟล์
                     </button>
                     <button @click="openContactModal(p)" class="w-full px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 rounded-xl text-left flex items-center gap-4 transition-colors">

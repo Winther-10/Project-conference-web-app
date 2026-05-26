@@ -447,7 +447,7 @@ const submitArticle = async () => {
     const uploadedUrls = [];
     const allFilesToUpload = [...fullPaperFiles.value, ...suppFiles.value];
     for (const file of allFilesToUpload) {
-      const cleanName = file.name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_');
+      const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const fileName = `submission_${Date.now()}_${cleanName}`;
       const filePath = `submissions/${userProfile.value.user_id}/${fileName}`;
       
@@ -455,7 +455,7 @@ const submitArticle = async () => {
       if (uploadErr) throw uploadErr;
       
       const { data: { publicUrl } } = supabase.storage.from('papers').getPublicUrl(filePath);
-      uploadedUrls.push(publicUrl);
+      uploadedUrls.push(`${publicUrl}?name=${encodeURIComponent(file.name)}`);
     }
     
     // Format authors as an array of strings for the papers table (Keep for backward compatibility)
